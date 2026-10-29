@@ -1,0 +1,6 @@
+tests/ext/
+tests/prof/
+tests/extid
+tests/*.log
+tests/log.jsonl
+tests/*.png
