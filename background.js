@@ -281,6 +281,7 @@ function migrate(from, to) {
     if (m[from] !== undefined) { m[to] = m[from]; delete m[from]; }
   }
   const id = (x) => (String(x) === from ? Number(to) : x);
+  s.log = s.log.map(id);   // a tab gets a new id when it sleeps
   for (const sh of s.task.shelves) sh.ids = sh.ids.map(id);
   if (s.task.left) s.task.left.ids = s.task.left.ids.map(id);
 }
@@ -417,7 +418,17 @@ async function refreshCarbon(force) {
 
 // --- optional page scripts (typing, predictive wake, call mode) ------------
 
-async function syncScripts() {
+// Registered scripts only reach pages loaded afterwards, so also run them in the tabs already open.
+// Call scripts are skipped: they have to start before the page does.
+async function injectIntoOpenTabs(specs) {
+  specs = specs.filter((spec) => spec && spec.matches.includes("<all_urls>"));
+  if (!specs.length) return;
+  const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"], discarded: false });
+  await Promise.allSettled(tabs.flatMap((tb) => specs.map((spec) =>
+    chrome.scripting.executeScript({ target: { tabId: tb.id }, files: spec.js }))));
+}
+
+async function syncScripts(everywhere = false) {   // everywhere: after install or reload
   const s = state;
   const all = await chrome.permissions.contains({ origins: ["<all_urls>"] });
   const calls = all || await chrome.permissions.contains({ origins: CALL_SITES });
@@ -440,6 +451,7 @@ async function syncScripts() {
     }
     if (remove.length) await chrome.scripting.unregisterContentScripts({ ids: remove });
     if (add.length) await chrome.scripting.registerContentScripts(add);
+    await injectIntoOpenTabs(everywhere ? Object.values(want) : add);
   } catch (e) {
     console.warn("Smart Tab Saver: page scripts", e);
   }
@@ -677,9 +689,9 @@ if (chrome.idle) {
 chrome.permissions.onAdded.addListener(() => serial(async () => { await load(); await syncScripts(); await save(); }));
 chrome.permissions.onRemoved.addListener(() => serial(async () => { await load(); await syncScripts(); await save(); }));
 
-async function setUp() {
+async function setUp(installed = false) {
   chrome.alarms.create("enforce", { periodInMinutes: 1 });
-  await syncScripts();
+  await syncScripts(installed);
   await syncOffscreen();
   await syncIdle();
   await sampleCpu();
@@ -701,7 +713,7 @@ chrome.runtime.onInstalled.addListener(() => serial(async () => {
   for (const tb of tabs.sort((a, b) => (a.lastAccessed || 0) - (b.lastAccessed || 0))) {
     if (!state.metas[key(tb.id)]) reference(tb.id, true);
   }
-  await setUp();
+  await setUp(true);
   await save();
 }));
 
