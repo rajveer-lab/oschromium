@@ -290,8 +290,8 @@ $("learn").addEventListener("click", async () => {
   b.disabled = true; b.textContent = "Learning…";
   const r = await send({ type: "learn" });
   b.disabled = false; b.textContent = "Learn from my browsing";
-  if (!r.ok) $("learn-msg").textContent = r.message;
-  render();
+  await render();
+  if (!r.ok) $("learn-msg").textContent = r.message || r.error;   // after render, which shows the last training
 });
 $("settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
 

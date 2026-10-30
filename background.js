@@ -511,16 +511,23 @@ function learn() {
   const s = state, c = s.settings.maxAwake;
   const log = s.log.map(String);
   const distinct = new Set(log).size;
-  if (log.length < 150 || distinct <= c) {
-    return { ok: false, message: `Not enough history yet: ${log.length} tab switches across ${distinct} tabs. Keep browsing with more than ${c} tabs and try again.` };
+  if (distinct <= c) {
+    return { ok: false, message: `Not enough history yet: ${distinct} different tabs so far, and learning needs more than ${c} (your "keep awake at most"). Keep browsing and try again.` };
   }
+  // The training rows are what matter, not a fixed number of switches.
   const { X, y } = optDataset(log, c, 2);
-  if (X.length < 100 || y.every((v) => v === y[0])) {
-    return { ok: false, message: "Your history doesn't have enough moments where a tab had to sleep. Keep browsing and try again." };
+  if (X.length < 100) {
+    return { ok: false, message: `Not enough history yet: ${log.length} tab switches gave ${X.length} moments where a tab had to sleep, and learning needs 100. Keep browsing and try again.` };
+  }
+  if (y.every((v) => v === y[0])) {
+    return { ok: false, message: "Your history doesn't have enough variety in which tabs came back. Keep browsing and try again." };
   }
   const fitted = fitLogReg(X, y);
   const candidate = { ...fitted, source: "learned", trainedOn: log.length };
   const before = replay(log, c, s.model), after = replay(log, c, candidate);
+  if (after.modelFaults > before.modelFaults) {
+    return { ok: false, message: `Trained on ${log.length} switches, but the new model would have caused ${after.modelFaults} reloads on them against ${before.modelFaults} with the current one, so the current one stays.` };
+  }
   s.model = candidate;
   s.lastLearn = { at: Date.now(), switches: log.length, rows: X.length,
     lruReloads: after.lruFaults, oldModelReloads: before.modelFaults, newModelReloads: after.modelFaults };
