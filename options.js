@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, CALL_SITES, CARBON_ORIGIN } from "./rules.js";
+import { DEFAULT_SETTINGS, CALL_SITES, CARBON_ORIGIN, PHONE_RELAY, PHONE_ORIGINS } from "./rules.js";
 
 const $ = (id) => document.getElementById(id);
 const send = (msg) => chrome.runtime.sendMessage(msg);
@@ -16,11 +16,20 @@ async function load() {
   $("paused").value = s.pausedMinutes;
   $("away").value = s.awayMinutes;
   $("handoff").checked = s.handoff;
+  $("phone").checked = s.phoneHandoff;
+  $("purl").value = s.phoneTopic ? `${PHONE_RELAY}/${s.phoneTopic}/trigger` : "Turn it on and save to get your link";
+  showPhone(state && state.phone && state.phone.last);
   $("ckey").value = s.carbonKey;
   $("zone").value = s.carbonZone;
   $("high").value = s.carbonHigh;
   $("sites").textContent = CALL_SITES.map((p) => p.replace(/^https:\/\/(\*\.)?/, "").replace(/\/\*$/, "")).join(", ");
   if (state && state.carbon) showCarbon(state.carbon);
+}
+
+function showPhone(last) {
+  if (!last) { $("pout").textContent = ""; return; }
+  const what = last.paused ? `paused ${last.paused} video${last.paused > 1 ? "s" : ""}, ${last.slept} put to sleep` : "nothing was playing";
+  $("pout").textContent = `Last signal${last.test ? " (test)" : ""} at ${new Date(last.at).toLocaleTimeString()}: ${what}.`;
 }
 
 function showCarbon(c) {
@@ -43,20 +52,22 @@ function collect() {
   return {
     protectPinned: $("pinned").checked, protectTyping: $("typing").checked, threshold: +$("thr").value, excluded,
     taskShiftSeconds: Math.round(60 * num("shift", 2)), tabGroups: $("groups").checked,
-    pausedMinutes: num("paused", 10), awayMinutes: num("away", 5), handoff: $("handoff").checked,
+    pausedMinutes: num("paused", 10), awayMinutes: num("away", 5), handoff: $("handoff").checked, phoneHandoff: $("phone").checked,
     carbonKey: $("ckey").value.trim(), carbonZone: $("zone").value.trim(), carbonHigh: num("high", 400),
   };
 }
 
-// Asking for a permission must happen straight from the click.
-function askCarbon(settings) {
-  return settings.carbonKey ? chrome.permissions.request({ origins: [CARBON_ORIGIN] }).catch(() => false) : Promise.resolve(true);
+// Asking for a permission must happen straight from the click, in one request.
+function askPermissions(settings) {
+  const origins = [...(settings.carbonKey ? [CARBON_ORIGIN] : []), ...(settings.phoneHandoff ? PHONE_ORIGINS : [])];
+  return origins.length ? chrome.permissions.request({ origins }).catch(() => false) : Promise.resolve(true);
 }
 
 $("save").addEventListener("click", async () => {
   const settings = collect();
-  await askCarbon(settings);
+  await askPermissions(settings);
   await send({ type: "settings", settings });
+  await load();
   $("saved").textContent = "Saved";
   setTimeout(() => ($("saved").textContent = ""), 1500);
 });
@@ -64,11 +75,35 @@ $("save").addEventListener("click", async () => {
 $("ctest").addEventListener("click", async () => {
   const settings = collect();
   if (!settings.carbonKey || !settings.carbonZone) { $("cout").textContent = "Add your key and zone first."; return; }
-  await askCarbon(settings);
+  await askPermissions(settings);
   await send({ type: "settings", settings });
   $("cout").textContent = "Checking…";
   const r = await send({ type: "carbon-test" });
   showCarbon(r && r.carbon);
+});
+
+$("pcopy").addEventListener("click", async () => {
+  if (!$("purl").value.startsWith("http")) return;
+  await navigator.clipboard.writeText($("purl").value).catch(() => $("purl").select());
+  $("pout").textContent = "Link copied.";
+});
+
+$("ptest").addEventListener("click", async () => {
+  if (!$("phone").checked) { $("pout").textContent = "Tick the box above first."; return; }
+  await chrome.permissions.request({ origins: PHONE_ORIGINS }).catch(() => false);
+  await send({ type: "settings", settings: { phoneHandoff: true } });
+  await load();
+  $("pout").textContent = "Sending…";
+  const r = await send({ type: "phone-test" });
+  if (!r || !r.ok) { $("pout").textContent = (r && r.error) || "Couldn't send the test signal."; return; }
+  $("pout").textContent = "Sent. Any YouTube video playing in this browser pauses within a few seconds.";
+  setTimeout(async () => { const { state } = await chrome.storage.local.get("state"); if (state && state.phone && state.phone.last && state.phone.last.test) showPhone(state.phone.last); }, 6000);
+});
+
+$("pnew").addEventListener("click", async () => {
+  const r = await send({ type: "phone-new-topic" });
+  if (r && r.topic) $("purl").value = `${PHONE_RELAY}/${r.topic}/trigger`;
+  $("pout").textContent = "New link made: put it in MacroDroid in place of the old one.";
 });
 
 $("reset-model").addEventListener("click", async () => { await send({ type: "reset-model" }); $("saved").textContent = "Model reset"; });
