@@ -1,5 +1,5 @@
 import { features, score, newMeta } from "./policy.js";
-import { CALL_SITES, DEFAULT_SETTINGS, REASON, counts, sleepable, limits, greenSignals, callActive, isAway } from "./rules.js";
+import { CALL_SITES, PHONE_ORIGINS, DEFAULT_SETTINGS, REASON, counts, sleepable, limits, greenSignals, callActive, isAway } from "./rules.js";
 import { clusterTabs } from "./tasks.js";
 
 const $ = (id) => document.getElementById(id);
@@ -46,6 +46,15 @@ function ago(ms) {
   return m < 1 ? "under a minute" : m === 1 ? "1 minute" : `${m} minutes`;
 }
 
+function phoneStatus(s) {
+  const last = s.phone && s.phone.last;
+  if (!last) return "Waiting for your phone. The steps to set it up are in Settings.";
+  const n = last.paused, plural = n > 1 ? "s" : "";
+  const what = !n ? "nothing was playing here"
+    : `paused ${n} YouTube video${plural}` + (last.slept ? ` and put ${last.slept === n ? (n > 1 ? "them" : "it") : last.slept} to sleep` : "");
+  return `${last.test ? "Test signal" : "You opened YouTube on your phone"} ${ago(Date.now() - last.at)} ago: ${what}.`;
+}
+
 // --- smart features: one row each, with a plain explanation and a "why" ---
 
 const FEATURES = [
@@ -74,7 +83,11 @@ const FEATURES = [
     key: "away", name: "Away & handoff",
     line: (s) => `A video you paused and left for ${s.settings.pausedMinutes} minute${s.settings.pausedMinutes === 1 ? "" : "s"} sleeps, and fewer tabs stay awake while you're away from the computer.`,
     why: "A paused video you walked away from, maybe to keep watching on the TV, still holds memory. Most video sites remember where you stopped. Stepping away is noticed from no keyboard or mouse use; a locked screen counts too.",
-    extra: { key: "handoff", label: "Also sleep a paused video here when the same one starts on my other Chrome device", hint: "Uses Chrome sync. Only a scrambled code of the video's address is shared, never the address. The tab you're looking at never sleeps." },
+    extras: [
+      { key: "handoff", label: "Also sleep a paused video here when the same one starts on my other Chrome device", hint: "Uses Chrome sync. Only a scrambled code of the video's address is shared, never the address. The tab you're looking at never sleeps." },
+      { key: "phoneHandoff", perm: PHONE_ORIGINS, label: "Pause and sleep YouTube here when I open YouTube on my phone", status: phoneStatus,
+        hint: "Phone: an automation app on your phone sends a signal through the ntfy.sh relay when you open YouTube (the steps are in Settings). Only that signal is sent, never what you watch, and the video starts again where it was paused." },
+    ],
     status: (s) => {
       const paused = Object.keys(s.pausedAt || {}).length;
       if (isAway(s)) return s.idle === "locked" ? "Screen locked: fewer tabs stay awake." : "You're away: fewer tabs stay awake.";
@@ -144,19 +157,33 @@ async function renderFeatures(s, x) {
       }
       body.append(st);
     }
-    if (f.extra && on) {
+    for (const x of (on && f.extras) || []) {
       const lab = el("label", "mini");
       const cb = el("input");
       cb.type = "checkbox";
-      cb.checked = !!s.settings[f.extra.key];
-      cb.onchange = async () => { await send({ type: "settings", settings: { [f.extra.key]: cb.checked } }); render(); };
-      lab.append(cb, el("span", "", f.extra.label));
+      cb.checked = !!s.settings[x.key];
+      cb.onchange = async () => {
+        if (cb.checked && x.perm) await chrome.permissions.request({ origins: x.perm }).catch(() => false);   // straight from the click
+        await send({ type: "settings", settings: { [x.key]: cb.checked } });
+        render();
+      };
+      lab.append(cb, el("span", "", x.label));
       body.append(lab);
+      if (!x.status || !s.settings[x.key]) continue;
+      const ok = all || !x.perm || await chrome.permissions.contains({ origins: x.perm });
+      const st = el("div", "now", ok ? x.status(s) : "Needs your permission to work. ");
+      if (!ok) {
+        const allow = el("button", "link", "Allow");
+        allow.type = "button";
+        allow.onclick = async () => { await chrome.permissions.request({ origins: x.perm }).catch(() => false); render(); };
+        st.append(allow);
+      }
+      body.append(st);
     }
     const d = el("details");
     d.open = openWhy.has(f.key);
     d.ontoggle = () => { if (d.open) openWhy.add(f.key); else openWhy.delete(f.key); };
-    d.append(el("summary", "", "Why?"), el("p", "", f.why + (f.extra ? " " + f.extra.hint : "")));
+    d.append(el("summary", "", "Why?"), el("p", "", f.why + (f.extras || []).map((x) => " " + x.hint).join("")));
     body.append(d);
     row.append(sw, body);
     box.append(row);
