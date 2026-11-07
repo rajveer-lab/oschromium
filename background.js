@@ -19,10 +19,13 @@
 //   - Green mode: on battery, with a busy CPU or a high-carbon power grid,
 //     fewer tabs stay awake.
 //   - Call mode: during a video call in the browser, fewer tabs stay awake.
+//   - Phone app: see the tabs on your phone and sleep, wake, close, pause or
+//     open them there (docs/app), end-to-end encrypted.
 
 import { PRETRAINED, newMeta, touch, features, score, optDataset, fitLogReg, replay } from "./policy.js";
 import { DEFAULT_SETTINGS, CALL_SITES, CARBON_ORIGIN, PHONE_RELAY, PHONE_ORIGINS, counts, sleepable, limits, isAway,
-  isVideoSite, isExcluded } from "./rules.js";
+  isVideoSite, isExcluded, hostOf } from "./rules.js";
+import { MAX_AGE, newPairing, seal, unseal, toLaptop, toPhone } from "./docs/app/link.js";
 import { clusterTabs } from "./tasks.js";
 
 const LOG_CAP = 5000;
@@ -69,7 +72,8 @@ async function load() {
   for (const k of PER_TAB) if (!state[k] || Array.isArray(state[k])) state[k] = {};
   if (!state.task || !Array.isArray(state.task.shelves)) state.task = { left: null, shelves: [] };
   if (!state.groups) state.groups = {};        // tab group id -> label, for groups we made
-  if (!state.phone) state.phone = { seen: [], last: null };   // phone handoff: signals seen, last one handled
+  if (!state.phone) state.phone = { seen: [], last: null };   // relay messages seen, last handoff handled
+  if (!state.phone.nonces) state.phone.nonces = [];             // phone app commands seen
   if (!state.deviceId) state.deviceId = crypto.randomUUID();
   return state;
 }
@@ -367,18 +371,25 @@ async function onRemotePlaying(v) {
   }
 }
 
-// --- phone handoff ---------------------------------------------------------
+// --- phone handoff and the phone app ---------------------------------------
 
-// Opening YouTube on your phone makes an automation app there publish a
-// signal to your private topic on the relay. While the service worker runs it
-// listens on a WebSocket (a ping every 20 s keeps it running); an alarm every
-// 30 s reconnects it and polls the relay in case a signal was missed. On a
-// signal, any video playing on YouTube here is paused, the time it stopped at
-// goes into the address, and the tab sleeps unless you're looking at it.
+// Two things reach this browser from your phone through a public ntfy relay:
+//   - Phone handoff: opening YouTube on your phone makes an automation app
+//     there publish a plain signal to a private topic. Any video playing on
+//     YouTube here is paused, the time it stopped at goes into the address,
+//     and the tab sleeps unless you're looking at it.
+//   - The phone app (docs/app) sends commands, sealed with the key from the
+//     pairing QR code: sleep, wake, close, pause or play a tab, pause YouTube,
+//     or send the address of a tab to open it on the phone. While the app is
+//     open it gets the list of tabs, sealed the same way, whenever it changes.
+// While the service worker runs it listens on one WebSocket for both topics (a
+// ping every 20 s keeps it running); an alarm every 30 s reconnects it and
+// polls the relay in case a message was missed.
 
-const PHONE_MAX_AGE = 120;                  // seconds: older signals are ignored
 const PHONE_TEST = "test from Smart Tab Saver";
-let phoneSocket = null, phonePing = null;
+const APP_LIVE = 5 * MINUTE;                // keep sending tab lists this long after the app was last seen
+let phoneSocket = null, phonePing = null, streamTimer = null;
+const streamReplies = [];
 
 function newTopic() {
   const abc = "abcdefghijkmnopqrstuvwxyz23456789";
@@ -389,16 +400,36 @@ async function phoneOn() {
   return state.settings.phoneHandoff && await chrome.permissions.contains({ origins: PHONE_ORIGINS });
 }
 
+async function remoteOn() {
+  return state.settings.remote && !!state.settings.remoteKey && await chrome.permissions.contains({ origins: PHONE_ORIGINS });
+}
+
+const pairing = () => ({ id: state.settings.remoteId, key: state.settings.remoteKey });
+
+function newRemotePairing() {
+  const p = newPairing();
+  Object.assign(state.settings, { remoteId: p.id, remoteKey: p.key });
+}
+
+async function phoneTopics() {
+  const topics = [];
+  if (await phoneOn()) topics.push(state.settings.phoneTopic);
+  if (await remoteOn()) topics.push(toLaptop(pairing()));
+  return topics;
+}
+
 async function syncPhone() {
   const s = state;
   if (s.settings.phoneHandoff && !s.settings.phoneTopic) s.settings.phoneTopic = newTopic();
-  if (!(await phoneOn())) {
+  if (s.settings.remote && !s.settings.remoteKey) newRemotePairing();
+  const topics = await phoneTopics();
+  if (!topics.length) {
     closePhone();
     await chrome.alarms.clear("phone");
     return;
   }
   if (!(await chrome.alarms.get("phone"))) chrome.alarms.create("phone", { periodInMinutes: 0.5 });
-  openPhone(s.settings.phoneTopic);
+  openPhone(topics.join(","));
 }
 
 function closePhone() {
@@ -411,16 +442,16 @@ function closePhone() {
   }
 }
 
-function openPhone(topic) {
-  if (phoneSocket && phoneSocket.topic === topic && phoneSocket.readyState <= WebSocket.OPEN) return;
+function openPhone(topics) {
+  if (phoneSocket && phoneSocket.topics === topics && phoneSocket.readyState <= WebSocket.OPEN) return;
   closePhone();
   let ws;
-  try { ws = new WebSocket(`${PHONE_RELAY.replace(/^http/, "ws")}/${topic}/ws`); } catch { return; }
-  ws.topic = topic;
+  try { ws = new WebSocket(`${PHONE_RELAY.replace(/^http/, "ws")}/${topics}/ws`); } catch { return; }
+  ws.topics = topics;
   ws.onmessage = (e) => {
     let m;
     try { m = JSON.parse(e.data); } catch { return; }
-    if (m.event === "message") serial(async () => { await load(); await onPhoneSignal(m); await save(); });
+    if (m.event === "message") serial(async () => { await load(); await onRelayMessage(m); await save(); });
   };
   ws.onclose = () => {                       // the next alarm reconnects
     if (phoneSocket !== ws) return;
@@ -431,16 +462,17 @@ function openPhone(topic) {
   phonePing = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send("ping"); }, 20000);
 }
 
-// Asks the relay for the last two minutes of signals. Runs outside the event
+// Asks the relay for the last two minutes of messages. Runs outside the event
 // queue so tabs never wait on the network.
 async function pollPhone(force = false) {
   await serial(load);
-  if (!(await phoneOn()) || (!force && phoneSocket && phoneSocket.readyState === WebSocket.OPEN)) return 0;
+  const topics = await phoneTopics();
+  if (!topics.length || (!force && phoneSocket && phoneSocket.readyState === WebSocket.OPEN)) return 0;
   let text = "";
   try {
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 10000);
-    const since = Math.floor(Date.now() / 1000) - PHONE_MAX_AGE;
-    const r = await fetch(`${PHONE_RELAY}/${state.settings.phoneTopic}/json?poll=1&since=${since}`,
+    const since = Math.floor(Date.now() / 1000) - MAX_AGE;
+    const r = await fetch(`${PHONE_RELAY}/${topics.join(",")}/json?poll=1&since=${since}`,
       { cache: "no-store", signal: ctl.signal });
     clearTimeout(timer);
     if (r.ok) text = await r.text();
@@ -449,16 +481,32 @@ async function pollPhone(force = false) {
   for (const line of text.split("\n")) {
     try { const m = JSON.parse(line); if (m.event === "message") msgs.push(m); } catch { /* blank line */ }
   }
-  if (msgs.length) await serial(async () => { await load(); for (const m of msgs) await onPhoneSignal(m); await save(); });
+  if (msgs.length) await serial(async () => { await load(); for (const m of msgs) await onRelayMessage(m); await save(); });
   return msgs.length;
 }
 
+function firstTime(list, item, cap = 60) {
+  if (!item || list.includes(item)) return false;
+  list.push(item);
+  if (list.length > cap) list.shift();
+  return true;
+}
+
+async function onRelayMessage(m) {
+  if (!firstTime(state.phone.seen, m.id)) return;
+  if (m.topic === state.settings.phoneTopic) await onPhoneSignal(m);
+  else if (state.settings.remoteId && m.topic === toLaptop(pairing())) await onRemote(m);
+}
+
 async function onPhoneSignal(m) {
-  const s = state, p = s.phone;
-  if (!m.id || p.seen.includes(m.id)) return;
-  p.seen.push(m.id);
-  if (p.seen.length > 30) p.seen.shift();
-  if (Date.now() / 1000 - (m.time || 0) > PHONE_MAX_AGE) return;
+  if (Date.now() / 1000 - (m.time || 0) > MAX_AGE) return;
+  state.phone.last = { at: Date.now(), ...(await pauseYouTube()), test: m.message === PHONE_TEST };
+}
+
+// Pauses every video playing on a video site; those tabs sleep unless you're
+// looking at them, or they're pinned or excluded.
+async function pauseYouTube() {
+  const s = state;
   let paused = 0, slept = 0;
   for (const tb of await chrome.tabs.query({})) {
     if (tb.discarded || !isVideoSite(tb.url)) continue;
@@ -471,7 +519,7 @@ async function onPhoneSignal(m) {
     if (tb.active || (tb.pinned && s.settings.protectPinned) || isExcluded(tb.url, s)) continue;
     if (await sleepTab(await chrome.tabs.get(tb.id), "phone")) slept += 1;
   }
-  p.last = { at: Date.now(), paused, slept, test: m.message === PHONE_TEST };
+  return { paused, slept };
 }
 
 // Runs inside the video page: pause whatever is playing and put the time in
@@ -489,6 +537,72 @@ function pauseVideo() {
     }
   } catch (e) { /* keep the address as it is */ }
   return { paused: playing.length, t };
+}
+
+// Runs inside a page: play its first video, or pause every one that's playing.
+function playOrPause(play) {
+  const videos = [...document.querySelectorAll("video")];
+  if (play) { if (videos[0]) videos[0].play().catch(() => {}); } else videos.forEach((v) => v.pause());
+  return videos.length;
+}
+
+async function onRemote(m) {
+  const s = state, p = s.phone;
+  const c = m.message && await unseal(s.settings.remoteKey, m.message);
+  if (!c || typeof c.t !== "string" || Math.abs(Date.now() - c.at) > MAX_AGE * 1000 || !firstTime(p.nonces, c.n)) return;
+  p.app = Date.now();                       // the app is open: keep its tab list fresh
+  const tab = Number.isInteger(c.id) ? await chrome.tabs.get(c.id).catch(() => null) : null;
+  let reply = null;
+  if (c.t === "sleep" && tab && !tab.active && !tab.discarded) await sleepTab(tab, "remote");
+  if (c.t === "wake" && tab && tab.discarded) {
+    delete s.asleep[key(tab.id)];
+    await chrome.tabs.reload(tab.id).catch(() => {});
+  }
+  if (c.t === "close" && tab) await chrome.tabs.remove(tab.id).catch(() => {});
+  if ((c.t === "pause" || c.t === "play") && tab && !tab.discarded) {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: "MAIN", func: playOrPause, args: [c.t === "play"] }).catch(() => {});
+  }
+  if (c.t === "pauseAll") p.last = { at: Date.now(), ...(await pauseYouTube()), test: false };
+  if (c.t === "url" && tab && isWeb(tab)) reply = { t: "url", id: tab.id, url: tab.url };
+  streamSoon(400, reply);
+}
+
+// The tab list the phone app shows. Titles are cut short and pages are given
+// by site only; the full address is sent when you ask to open a tab.
+async function tabList() {
+  const s = state, tabs = (await chrome.tabs.query({})).filter(isWeb).slice(0, 150);
+  const tasks = s.settings.taskFocus ? taskClusters(tabs) : [];
+  const taskOf = new Map();
+  tasks.forEach((t, i) => t.ids.forEach((id) => taskOf.set(id, i)));
+  return {
+    t: "state", at: Date.now(), limit: limits(s).c,
+    awake: tabs.filter((tb) => awake(tb) && counts(tb, s)).length,
+    tasks: tasks.map((t) => t.label),
+    tabs: tabs.map((tb) => ({
+      i: tb.id, t: (tb.title || tb.url).slice(0, 90), h: hostOf(tb.url), k: taskOf.has(tb.id) ? taskOf.get(tb.id) : -1,
+      s: tb.discarded ? 1 : 0, a: tb.active ? 1 : 0, p: tb.audible ? 1 : 0, v: isVideoSite(tb.url) ? 1 : 0,
+    })),
+  };
+}
+
+// Sends the tab list (and any reply) to the app, if it was open recently.
+function streamSoon(delay = 1500, reply = null) {
+  if (reply) streamReplies.push(reply);
+  if (!state || !state.phone || Date.now() - (state.phone.app || 0) > APP_LIVE) return;
+  clearTimeout(streamTimer);
+  streamTimer = setTimeout(publishToApp, delay);
+}
+
+async function publishToApp() {
+  await serial(load);
+  if (!(await remoteOn())) return;
+  const msgs = streamReplies.splice(0);
+  msgs.push(await tabList());
+  for (const msg of msgs) {
+    try {
+      await fetch(`${PHONE_RELAY}/${toPhone(pairing())}`, { method: "POST", body: await seal(state.settings.remoteKey, msg) });
+    } catch { /* the app asks again */ }
+  }
 }
 
 async function phoneTest() {
@@ -797,6 +911,11 @@ const handlers = {
     state.task.shelves = state.task.shelves.filter((sh) => !sh.ids.some((id) => msg.ids.includes(id)));
   },
   async refresh() { await sampleCpu(); },
+  async "remote-unpair"() {                // a new key: phones paired before can no longer read or send
+    newRemotePairing();
+    await syncPhone();
+    return { ok: true };
+  },
   async "phone-new-topic"() {
     state.settings.phoneTopic = newTopic();
     await syncPhone();
@@ -896,3 +1015,8 @@ chrome.alarms.onAlarm.addListener((a) => {
   });
   refreshCarbon(false);
 });
+
+// Keep an open phone app up to date as tabs change.
+for (const ev of [chrome.tabs.onCreated, chrome.tabs.onRemoved, chrome.tabs.onActivated, chrome.tabs.onUpdated]) {
+  ev.addListener(() => streamSoon());
+}
