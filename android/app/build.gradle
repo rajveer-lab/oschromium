@@ -1,0 +1,50 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.rajveerlab.smarttabsaver"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.rajveerlab.smarttabsaver"
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+    }
+
+    // The app's screens are the phone app in docs/app, bundled into the APK.
+    sourceSets {
+        main {
+            assets.srcDirs = ["../../docs/app"]
+        }
+    }
+
+    // A project key, so every build can update the app installed before.
+    // It's in the repository, so anyone can sign with it: make a private
+    // key before publishing on Google Play.
+    signingConfigs {
+        project {
+            storeFile file("../smarttabsaver.keystore")
+            storePassword "smarttabsaver"
+            keyAlias "smarttabsaver"
+            keyPassword "smarttabsaver"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.project
+        }
+        debug {
+            signingConfig signingConfigs.project
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
