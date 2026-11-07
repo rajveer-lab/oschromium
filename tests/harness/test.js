@@ -196,6 +196,46 @@ async function phase(name, fn) {
     check("video playing on another device sleeps here", await discarded("tv") && s.asleep[String(ids.tv)].by === "handoff", s.asleep[String(ids.tv)]);
   });
 
+  await phase("phone handoff", async () => {
+    await settings({ phoneHandoff: true, maxAwake: 9 });
+    let s = await st();
+    const topic = s.settings.phoneTopic;
+    check("private relay topic made", /^sts-[a-z0-9]{20}$/.test(topic), topic);
+    check("relay polled every 30 s", !!(await chrome.alarms.get("phone")));
+    const relay = "http://127.0.0.1:8812/relay/" + topic;
+    const phone = async (q = "") => { await fetch(relay + q, { method: "POST", body: "youtube opened" }); const r = await send({ type: "phone-check" }); await sleep(600); return r; };
+    const playing = () => run(() => !document.querySelector("video").paused, "tube");
+    await open("tube", "http://127.0.0.1:8812/watch?v=demo123");
+    await sleep(2500);
+    check("video playing", await playing());
+    await activate("python");
+    let r = await phone();
+    s = await st();
+    let tube = await chrome.tabs.get(ids.tube);
+    check("signal from the phone picked up", r.ok && r.signals >= 1 && s.phone.last && s.phone.last.paused === 1, { r, last: s.phone.last });
+    check("background video tab put to sleep", tube.discarded && (s.asleep[String(tube.id)] || {}).by === "phone", s.asleep[String(tube.id)]);
+    check("time it stopped at kept in the address", /[?&]t=\d+s/.test(tube.url) && tube.url.includes("v=demo123"), tube.url);
+    const last = s.phone.last.at;
+    await send({ type: "phone-check" }); await sleep(400);
+    check("a signal is handled once", (await st()).phone.last.at === last);
+    await phone("?age=600");
+    check("a signal older than 2 minutes is ignored", (await st()).phone.last.at === last);
+    await activate("tube");
+    await sleep(2500);
+    check("woken video plays again", await playing());
+    r = await phone();
+    s = await st();
+    check("the tab you're looking at is paused but stays awake", !(await playing()) && !(await discarded("tube")) && s.phone.last.paused === 1 && s.phone.last.slept === 0, s.phone.last);
+    await activate("python");
+    r = await send({ type: "phone-test" });
+    await sleep(2500);
+    s = await st();
+    check("test signal from Settings goes through the relay", r.ok && s.phone.last.test === true && s.phone.last.paused === 0, { r, last: s.phone.last });
+    await settings({ phoneHandoff: false, maxAwake: 4 });
+    check("turning it off stops polling", !(await chrome.alarms.get("phone")));
+    await chrome.tabs.remove(ids.tube); delete ids.tube;
+  });
+
   await phase("paused video and away", async () => {
     await open("video");
     const played = await run(() => window.play(), "video");
@@ -248,6 +288,8 @@ async function phase(name, fn) {
     check("popup status filled", /^\d+$/.test(d.getElementById("awake").textContent), d.getElementById("awake").textContent);
     const o = document.getElementById("opt").contentDocument;
     check("settings page loaded values", o.getElementById("shift").value !== "" && o.getElementById("sites").textContent.includes("meet.google.com"), o.getElementById("sites").textContent);
+    check("phone handoff offered in the popup", d.getElementById("features").textContent.includes("Pause and sleep YouTube here"));
+    check("phone handoff set-up in Settings", !!o.getElementById("purl") && o.body.textContent.includes("MacroDroid"));
     check("no errors in popup or settings", errs.length === 0, errs);
     log("popup features:", [...d.querySelectorAll("#features .feat")].map((e) => e.querySelector("b").textContent + " | " + (e.querySelector(".now") || {}).textContent).join(" || "));
     for (const id of ["pop", "opt"]) { const f = document.getElementById(id); f.style.height = f.contentDocument.documentElement.scrollHeight + "px"; }
