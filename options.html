@@ -59,6 +59,15 @@
     <label class="opt"><input type="checkbox" id="handoff"> <span><b>Sleep a paused video here when the same video starts on my other Chrome device</b><br><span class="hint">Uses Chrome sync between browsers signed in to your account. Only a scrambled code of the video's address is shared, never the address.</span></span></label>
   </section>
 
+  <h2 class="sec">Phone handoff (YouTube)</h2>
+  <section class="card">
+    <label class="opt"><input type="checkbox" id="phone"> <span><b>Pause and sleep YouTube here when I open YouTube on my phone</b><br><span class="hint">An automation app on your phone sends a signal through the free ntfy.sh relay, to a private link only your phone and this browser know. Only that signal is sent, never what you watch. The video starts again where it was paused.</span></span></label>
+    <div class="field"><label class="label" for="purl">Your phone's link</label>
+      <div class="actions"><input class="text" type="text" id="purl" readonly spellcheck="false" style="flex:1;width:auto"><button type="button" class="small" id="pcopy">Copy</button></div></div>
+    <div class="hint"><b>On Android</b>, with the free MacroDroid app: add a macro with the trigger <b>Application Launched</b> → YouTube and the action <b>HTTP Request</b> (method GET, URL: the link above), then save it. Turn off battery optimisation for MacroDroid so it can run in the background. Anyone with the link can pause YouTube here, so keep it to yourself; <b>New link</b> replaces it.</div>
+    <div class="actions"><button type="button" class="small" id="ptest">Send a test signal</button><button type="button" class="small" id="pnew">New link</button><span class="hint" id="pout"></span></div>
+  </section>
+
   <h2 class="sec">Green mode</h2>
   <section class="card">
     <div class="hint">Battery and CPU work with no setup. To also react to how dirty your power grid is right now, add a free key from <b>electricitymaps.com</b> (Free tier → API key) and your zone.</div>
