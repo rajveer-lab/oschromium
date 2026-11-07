@@ -64,11 +64,20 @@ Watching YouTube on the laptop and then opening the YouTube app on your phone pa
 Chrome on phones doesn't run extensions, and YouTube doesn't tell other devices what you play, so a small automation on the phone sends the signal:
 
 1. **Turn it on.** In the popup, under Away & handoff, tick "Pause and sleep YouTube here when I open YouTube on my phone", or tick it in Settings and click **Save**. Settings then shows **your phone's link**, a private address on the free [ntfy.sh](https://ntfy.sh) relay. Click **Copy**.
-2. **Set up the phone (Android).** Install the free [MacroDroid](https://www.macrodroid.com/) app and add a macro:
+2. **Set up the phone.**
+
+   **Android:** install the free [MacroDroid](https://www.macrodroid.com/) app and add a macro:
    - **Trigger:** Application Launched → YouTube
    - **Action:** HTTP Request, method GET, URL: your phone's link
-   
+
    Save it, and turn off battery optimisation for MacroDroid so it can run in the background.
+
+   **iPhone (iOS 17 or later):** use the built-in Shortcuts app, nothing to download:
+   1. Open **Shortcuts**, go to the **Automation** tab and tap **+** (or **New Automation**).
+   2. Choose **App**, tap **Choose**, pick **YouTube** and make sure **Is Opened** is ticked.
+   3. Select **Run Immediately** (optionally turn off **Notify When Run**) and tap **Next**.
+   4. Tap **New Blank Automation** → **Add Action**, search for **Get Contents of URL** and tap it.
+   5. Tap the **URL** field, paste your phone's link and tap **Done**.
 3. **Try it.** Play a YouTube video on the laptop, switch to another tab and open YouTube on your phone. The laptop's video pauses and its tab sleeps, labelled "playing on your phone". **Send a test signal** in Settings does the same from the laptop, without the phone.
 
 How it works: the extension listens to its private topic on the relay over a WebSocket and checks the relay every 30 seconds as a backstop. On a signal less than 2 minutes old, it pauses any video playing on YouTube, puts the time it stopped at in the address (`t=`), and puts the tab to sleep. Only the signal goes through the relay, never what you watch. Anyone with the link could pause YouTube on your laptop, so keep it to yourself; **New link** in Settings replaces it.
