@@ -14,7 +14,11 @@ m = json.load(open("manifest.json")); m["host_permissions"] = ["<all_urls>"]; js
 r = open("rules.js").read()
 r = r.replace('"https://whereby.com/*",\n];', '"https://whereby.com/*",\n  "http://127.0.0.1/*",\n];')
 r = r.replace('export const CARBON_ORIGIN = "https://api.electricitymap.org/*";', 'export const CARBON_ORIGIN = "http://127.0.0.1/*";')
+r = r.replace('export const PHONE_RELAY = "https://ntfy.sh";', 'export const PHONE_RELAY = "http://127.0.0.1:8812/relay";')
+r = r.replace('export const VIDEO_SITES = ["youtube.com"];', 'export const VIDEO_SITES = ["youtube.com", "127.0.0.1"];')
+r = r.replace('"https://*.youtube.com/*"];', '"https://*.youtube.com/*", "http://127.0.0.1/*"];')
 assert '127.0.0.1/*",\n];' in r and 'CARBON_ORIGIN = "http://127.0.0.1' in r
+assert 'PHONE_RELAY = "http://127.0.0.1:8812/relay"' in r and '"youtube.com", "127.0.0.1"]' in r and '"http://127.0.0.1/*"];' in r
 open("rules.js", "w").write(r)
 b = open("background.js").read()
 old = "https://api.electricitymap.org/v3/carbon-intensity/latest?zone="
