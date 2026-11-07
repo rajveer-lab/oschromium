@@ -412,6 +412,17 @@ async function phase(name, fn) {
     await settings({ predictiveWake: false, callMode: false });
   });
 
+  await phase("learning from your browsing", async () => {
+    let s = await st();
+    check("model uses the 13 features", s.model.weights.length === 13 && s.taskLog.length === s.log.length, { w: s.model.weights.length, log: s.log.length, tasks: s.taskLog.length });
+    check("tasks are recorded with the switches", s.taskLog.some((k) => typeof k === "string"), s.taskLog.slice(-8));
+    const r = await send({ type: "learn" });
+    s = await st();
+    check("Learn from my browsing trains or explains why not", (r.ok && s.model.source === "learned" && s.model.weights.length === 13) || /Not enough history|current one stays/.test(r.message || ""), r);
+    await send({ type: "reset-model" });
+    check("going back to the pretrained model", (await st()).model.source === "pretrained");
+  });
+
   log(`DONE ${passes} passed, ${fails} failed`);
   post({ done: true, passes, fails });
 })();
