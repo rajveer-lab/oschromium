@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Tab Saver</title>
+<meta name="theme-color" content="#1f6f5c">
+<link rel="icon" href="app/icon-192.png">
+<link rel="stylesheet" href="app/app.css">
+<style>
+  body { max-width: 620px; margin: 0 auto; }
+  .buttons { display: grid; gap: 10px; margin-top: 18px; }
+  .buttons a { display: block; text-align: center; border-radius: 14px; padding: 14px; font-weight: 600; text-decoration: none; border: 1px solid var(--line); color: var(--ink); }
+  .buttons a.main { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+</style>
+</head>
+<body>
+  <header>
+    <img src="app/icon-192.png" alt="" width="40" height="40">
+    <div><h1>Smart Tab Saver</h1><div class="sub">A Chrome extension that keeps only the tabs you need awake</div></div>
+  </header>
+  <p>Smart Tab Saver puts the tabs you won't need soon to sleep, using a policy learned from Belady's optimal page-replacement algorithm, and groups your tabs into tasks. Its phone app lets you see and control your laptop's tabs from your phone.</p>
+  <div class="buttons">
+    <a class="main" href="app/">Open the phone app</a>
+    <a href="https://drive.google.com/file/d/1zC7HcSF-0APsv2wK4xu38vv_f1qBksJv/view?usp=sharing">Watch the demo</a>
+    <a href="https://github.com/rajveer-lab/oschromium">Get the extension on GitHub</a>
+  </div>
+</body>
+</html>
