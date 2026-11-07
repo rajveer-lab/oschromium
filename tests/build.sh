@@ -5,7 +5,7 @@ set -e
 T=$(dirname "$(readlink -f "$0")")
 ROOT=$(dirname "$T")
 rm -rf "$T/ext" && mkdir -p "$T/ext"
-(cd "$ROOT" && cp -r manifest.json *.js *.html *.css icons "$T/ext/")
+(cd "$ROOT" && cp -r manifest.json *.js *.html *.css icons lib "$T/ext/" && mkdir -p "$T/ext/docs/app" && cp docs/app/link.js "$T/ext/docs/app/")
 cp "$T/harness/test.html" "$T/harness/test.js" "$T/ext/"
 cd "$T/ext"
 python3 - <<'PY'
