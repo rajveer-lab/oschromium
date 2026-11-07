@@ -1,5 +1,5 @@
 # Smart Tab Saver
-
+ 
 A Chrome extension that keeps only the tabs you need awake, using a policy learned from Belady's optimal algorithm, plus task focus, predictive wake, away and handoff, green mode and call mode.
 
 Manifest V3 · Chrome 116 or later · plain JavaScript ES modules, no build step and no dependencies.
