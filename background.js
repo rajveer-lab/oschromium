@@ -1,11 +1,13 @@
 // Smart Tab Saver service worker.
 //
 // Keeps at most `maxAwake` tabs loaded. When there are too many, it puts one
-// to sleep (chrome.tabs.discard) chosen by the learned policy:
-//   1. score every tab that may sleep with P(not needed soon);
+// to sleep (chrome.tabs.discard) chosen by the learned policy (policy.js):
+//   1. score every tab that may sleep with P(not needed soon), from its own
+//      history, where it stands among the other tabs, and its task;
 //   2. if even the best score is below the threshold, use LRU instead;
-//   3. a regret guard weighs the model against LRU: a sleeping tab you come
-//      back to soon counts against whichever of the two put it to sleep.
+//   3. switching: the model and LRU both run as shadows on the same switches,
+//      and the one that caused fewer reloads lately decides (Chledowski et
+//      al. 2021), so the model never does much worse than LRU.
 //
 // Smart features on top (each can be switched off in the popup):
 //   - Task focus: open tabs are grouped into tasks (tasks.js). When you move
@@ -22,16 +24,16 @@
 //   - Phone app: see the tabs on your phone and sleep, wake, close, pause or
 //     open them there (docs/app), end-to-end encrypted.
 
-import { PRETRAINED, newMeta, touch, features, score, optDataset, fitLogReg, replay } from "./policy.js";
+import { PRETRAINED, usable, newMeta, touch, features, contexts, score, trainModel, replay, walk, optChoice } from "./policy.js";
 import { DEFAULT_SETTINGS, CALL_SITES, CARBON_ORIGIN, PHONE_RELAY, PHONE_ORIGINS, counts, sleepable, limits, isAway,
   isVideoSite, isExcluded, hostOf } from "./rules.js";
 import { MAX_AGE, CODE_MINUTES, newPairing, pairingCode, newShortCode, codeChannel, seal, unseal, toLaptop, toPhone } from "./docs/app/link.js";
 import { clusterTabs } from "./tasks.js";
 
 const LOG_CAP = 5000;
-const LEARNING_RATE = 0.45;
+const HALF_LIFE = 100;          // switches: how fast the model's and LRU's recent reloads are forgotten
 const MINUTE = 60 * 1000;
-const PER_TAB = ["metas", "asleep", "hModel", "hLRU", "shadow", "dirty", "calls", "prewoke", "playing", "pausedAt"];
+const PER_TAB = ["metas", "asleep", "shadow", "shadowModel", "dirty", "calls", "prewoke", "playing", "pausedAt"];
 
 let state = null;
 let queue = Promise.resolve();
@@ -56,12 +58,14 @@ async function load() {
     clock: 0,
     metas: {},          // tabId -> history of switches to it
     asleep: {},         // tabId -> { by, why, at, title, url }
-    hModel: {},         // tabId -> time the model put it to sleep (regret history)
-    hLRU: {},           // tabId -> time LRU put it to sleep
-    wModel: 0.5,
+    wModel: 0.5,        // the model's share of recent success against LRU (the popup's trust bar)
+    lead: { model: 0, lru: 0 },   // recent reloads of each, fading: the one with fewer decides
     shadow: {},         // tabs plain LRU would keep awake -> their last switch time
+    shadowModel: {},    // tabs the model alone would keep awake
     dirty: {},          // tabId -> true while the user has typed unsaved text
     log: [],            // tab switch history, for learning
+    taskLog: [],        // the task of each switch in log (or null)
+    taskLast: {},       // task -> clock of its last switch
     stats: freshStats(),
     model: PRETRAINED,
     settings: DEFAULT_SETTINGS,
@@ -75,6 +79,10 @@ async function load() {
   if (!state.phone) state.phone = { seen: [], last: null };   // relay messages seen, last handoff handled
   if (!state.phone.nonces) state.phone.nonces = [];             // phone app commands seen
   if (!state.deviceId) state.deviceId = crypto.randomUUID();
+  if (!usable(state.model)) Object.assign(state, { model: PRETRAINED, lastLearn: null });   // an older version's model
+  if (!state.lead) state.lead = { model: 0, lru: 0 };
+  if (!state.taskLast) state.taskLast = {};
+  if (!Array.isArray(state.taskLog) || state.taskLog.length !== state.log.length) state.taskLog = state.log.map(() => null);
   return state;
 }
 
@@ -87,7 +95,7 @@ const isWeb = (tb) => /^https?:/.test(tb.url || "");
 
 // --- references: a tab is opened or switched to ---------------------------
 
-function reference(tabId, isNew) {
+function reference(tabId, isNew, task) {
   const s = state, k = key(tabId), now = Date.now();
   if (s.log.length && s.log[s.log.length - 1] === tabId) {    // same tab again (created, then activated)
     if (s.metas[k]) s.metas[k].seen = now;
@@ -99,44 +107,40 @@ function reference(tabId, isNew) {
   // A switch to a tab we put to sleep is a reload: the "page fault".
   if (s.asleep[k] && !isNew) {
     s.stats.reloads += 1;
-    regret(k, t);
     delete s.asleep[k];
   }
-  // A tab we woke early because you were heading for it: no wait for you,
-  // but putting it to sleep was still a mistake for the regret guard.
+  // A tab we woke early because you were heading for it: no wait for you.
   if (s.prewoke[k]) {
     if (now - s.prewoke[k].at < 10 * MINUTE) s.stats.prewakeHits += 1;
-    regret(k, t);
     delete s.prewoke[k];
   }
-  // Shadow LRU: the same switches, the same limit and protections, but LRU
-  // chooses. A switch to a tab it would have put to sleep counts as its reload.
-  if (s.shadow[k] === undefined && !isNew && s.metas[k]) s.stats.lruReloads += 1;
+  // Shadows: the same switches, the same limit and protections, but LRU, or
+  // the model alone, chooses. A switch to a tab one of them would have put to
+  // sleep counts as its reload; the counts fade so recent ones matter most.
+  const fade = Math.pow(0.5, 1 / HALF_LIFE);
+  s.lead.model *= fade;
+  s.lead.lru *= fade;
+  if (!isNew && s.metas[k]) {
+    if (s.shadow[k] === undefined) { s.stats.lruReloads += 1; s.lead.lru += 1; }
+    if (!s.shadowModel[k]) s.lead.model += 1;
+  }
+  const total = s.lead.model + s.lead.lru;
+  s.wModel = total > 0.05 ? s.lead.lru / total : 0.5;
   s.shadow[k] = t;
+  s.shadowModel[k] = 1;
+  if (task) s.taskLast[task] = t;
 
   if (s.pausedAt[k]) s.pausedAt[k] = now;   // you looked at the paused video again
   if (!s.metas[k]) s.metas[k] = newMeta();
   touch(s.metas[k], t);
   s.metas[k].seen = now;
   s.log.push(tabId);
-  if (s.log.length > LOG_CAP) s.log.splice(0, s.log.length - LOG_CAP);
-  return true;
-}
-
-function regret(k, t) {
-  const s = state;
-  const d = Math.pow(0.005, 1 / Math.max(1, s.settings.maxAwake));
-  for (const [hist, modelWasWrong] of [[s.hModel, true], [s.hLRU, false]]) {
-    if (hist[k] !== undefined) {
-      const reward = Math.pow(d, t - hist[k]);
-      delete hist[k];
-      let wm = s.wModel, wl = 1 - s.wModel;
-      if (modelWasWrong) wl *= Math.exp(LEARNING_RATE * reward);
-      else wm *= Math.exp(LEARNING_RATE * reward);
-      s.wModel = Math.min(0.98, Math.max(0.02, wm / (wm + wl)));
-      return;
-    }
+  s.taskLog.push(task || null);
+  if (s.log.length > LOG_CAP) {
+    s.log.splice(0, s.log.length - LOG_CAP);
+    s.taskLog.splice(0, s.taskLog.length - LOG_CAP);
   }
+  return true;
 }
 
 function awake(tab) {
@@ -215,17 +219,34 @@ async function enforce(tabs, tasks) {
   const live = tabs.filter((tb) => !slept.has(tb.id));
   let awakeCount = live.filter((tb) => awake(tb) && counts(tb, s)).length;
   const candidates = live.filter((tb) => sleepable(tb, s, now));
-  if (!tasks && s.settings.taskFocus && awakeCount > L.c) tasks = taskClusters(tabs);
-  const cur = s.settings.taskFocus && tasks ? tasks.find((c) => c.ids.includes(lastRef)) : null;
+  if (!tasks) tasks = taskClusters(tabs);
+  const cur = s.settings.taskFocus ? tasks.find((c) => c.ids.includes(lastRef)) : null;
   while (awakeCount > L.c && candidates.length) {
     const pool = cur ? candidates.filter((tb) => !cur.ids.includes(tb.id)) : candidates;
-    const { tab, by } = pickVictim(pool.length ? pool : candidates, L.threshold);
+    const residents = live.filter((tb) => awake(tb) && counts(tb, s));
+    const { tab, by } = pickVictim(pool.length ? pool : candidates, residents, tasks, L.threshold);
     candidates.splice(candidates.indexOf(tab), 1);
     // over the usual limit it's the usual rule; under it, a smart mode asked
     const why = awakeCount > L.base ? null : (L.modes[0] ? L.modes[0].mode : null);
     if (await sleepTab(tab, by, why)) awakeCount -= 1;
   }
   shadowEnforce(tabs, L.c);
+  shadowModelEnforce(tabs, tasks, L.c);
+}
+
+// What the model alone would keep awake, for switching.
+function shadowModelEnforce(tabs, tasks, c) {
+  const s = state, live = new Set(tabs.map((tb) => key(tb.id)));
+  for (const k of Object.keys(s.shadowModel)) if (!live.has(k)) delete s.shadowModel[k];
+  const asIfAwake = (tb) => ({ ...tb, discarded: false, status: "complete" });
+  const members = tabs.filter((tb) => s.shadowModel[key(tb.id)] && counts(tb, s));
+  const cands = members.filter((tb) => tb.status !== "loading" && sleepable(asIfAwake(tb), s));
+  while (members.length > c && cands.length) {
+    const v = modelPick(cands, members, tasks);
+    delete s.shadowModel[key(v.tab.id)];
+    members.splice(members.indexOf(v.tab), 1);
+    cands.splice(cands.indexOf(v.tab), 1);
+  }
 }
 
 function shadowEnforce(tabs, c) {
@@ -243,17 +264,30 @@ function shadowEnforce(tabs, c) {
   }
 }
 
-function pickVictim(candidates, threshold) {
+const metaOf = (tb) => state.metas[key(tb.id)] || newMeta();
+
+// The model's pick among candidates: features are worked out over all the
+// awake tabs (residents), as in training. Returns the tab and its score.
+function modelPick(candidates, residents, tasks) {
   const s = state, c = s.settings.maxAwake, t = s.clock;
-  const meta = (tb) => s.metas[key(tb.id)] || { ...newMeta(), last: 0, count: 0 };
-  const lruTab = () => candidates.reduce((a, b) => (meta(a).last <= meta(b).last ? a : b));
-  if (Math.random() < s.wModel) {
-    let best = null, bestScore = -1;
-    for (const tb of candidates) {
-      const sc = score(s.model, features(meta(tb), t, c));
-      if (sc > bestScore) { bestScore = sc; best = tb; }
-    }
-    if (bestScore >= threshold) return { tab: best, by: "model" };
+  const taskOf = new Map();
+  for (const task of tasks || []) for (const id of task.ids) taskOf.set(id, task.label);
+  const all = [...new Set([...residents, ...candidates])];
+  const ctx = contexts(all, metaOf, t, (tb) => taskOf.get(tb.id), taskOf.get(s.log[s.log.length - 1]), (k) => s.taskLast[k]);
+  let best = null, top = -1;
+  for (const tb of candidates) {
+    const sc = score(s.model, features(metaOf(tb), t, c, ctx.get(tb)));
+    if (sc > top) { top = sc; best = tb; }
+  }
+  return { tab: best, score: top };
+}
+
+function pickVictim(candidates, residents, tasks, threshold) {
+  const s = state;
+  const lruTab = () => candidates.reduce((a, b) => (metaOf(a).last <= metaOf(b).last ? a : b));
+  if (s.lead.model <= s.lead.lru) {          // the model has caused no more reloads than LRU lately
+    const m = modelPick(candidates, residents, tasks);
+    if (m.score >= threshold) return { tab: m.tab, by: "model" };
   }
   return { tab: lruTab(), by: "lru" };
 }
@@ -268,12 +302,8 @@ async function sleepTab(tab, by, why = null) {
     s.asleep[nk] = { by, why, at: Date.now(), title: tab.title || tab.url, url: tab.url };
     delete s.pausedAt[nk];
     delete s.prewoke[nk];
-    if (by === "model") { s.hModel[nk] = s.clock; s.stats.modelSleeps += 1; }
-    if (by === "lru") { s.hLRU[nk] = s.clock; s.stats.lruSleeps += 1; }
-    for (const h of [s.hModel, s.hLRU]) {
-      const keys = Object.keys(h);
-      if (keys.length > s.settings.maxAwake) delete h[keys.sort((a, b) => h[a] - h[b])[0]];
-    }
+    if (by === "model") s.stats.modelSleeps += 1;
+    if (by === "lru") s.stats.lruSleeps += 1;
     s.stats.sleeps += 1;
     return true;
   } catch (e) {
@@ -763,27 +793,26 @@ async function syncGroups(tabs, tasks) {
 
 function learn() {
   const s = state, c = s.settings.maxAwake;
-  const log = s.log.map(String);
+  const log = s.log.map(String), task = s.taskLog;
   const distinct = new Set(log).size;
   if (distinct <= c) {
     return { ok: false, message: `Not enough history yet: ${distinct} different tabs so far, and learning needs more than ${c} (your "keep awake at most"). Keep browsing and try again.` };
   }
-  // The training rows are what matter, not a fixed number of switches.
-  const { X, y } = optDataset(log, c, 2);
-  if (X.length < 100) {
-    return { ok: false, message: `Not enough history yet: ${log.length} tab switches gave ${X.length} moments where a tab had to sleep, and learning needs 100. Keep browsing and try again.` };
+  // The moments a tab had to sleep are what it learns from, not a fixed number of switches.
+  let moments = 0;
+  walk(log, task, c, optChoice, () => moments++);
+  if (moments < 15) {
+    return { ok: false, message: `Not enough history yet: ${log.length} tab switches gave ${moments} moments where a tab had to sleep, and learning needs 15. Keep browsing and try again.` };
   }
-  if (y.every((v) => v === y[0])) {
-    return { ok: false, message: "Your history doesn't have enough variety in which tabs came back. Keep browsing and try again." };
-  }
-  const fitted = fitLogReg(X, y);
-  const candidate = { ...fitted, source: "learned", trainedOn: log.length };
-  const before = replay(log, c, s.model), after = replay(log, c, candidate);
+  // Same method as the pretrained model (model/README.md), on your own switches.
+  const fitted = trainModel([{ log, task }], [c], { rounds: 2, perRound: 3000, iters: 300 });
+  const candidate = { weights: fitted.weights, bias: fitted.bias, source: "learned", trainedOn: log.length };
+  const before = replay(log, task, c, s.model), after = replay(log, task, c, candidate);
   if (after.modelFaults > before.modelFaults) {
     return { ok: false, message: `Trained on ${log.length} switches, but the new model would have caused ${after.modelFaults} reloads on them against ${before.modelFaults} with the current one, so the current one stays.` };
   }
   s.model = candidate;
-  s.lastLearn = { at: Date.now(), switches: log.length, rows: X.length,
+  s.lastLearn = { at: Date.now(), switches: log.length, rows: moments,
     lruReloads: after.lruFaults, oldModelReloads: before.modelFaults, newModelReloads: after.modelFaults };
   return { ok: true, ...s.lastLearn };
 }
@@ -792,10 +821,11 @@ function learn() {
 
 async function onSwitch(tabId, isNew) {
   await load();
-  const moved = reference(tabId, isNew);
   const tabs = await chrome.tabs.query({});
-  const tasks = state.settings.taskFocus ? taskClusters(tabs) : null;
-  if (moved && tasks) trackTask(tabId, tasks);
+  const tasks = taskClusters(tabs);           // the model uses tasks even when task focus is off
+  const mine = tasks.find((c) => c.ids.includes(tabId));
+  const moved = reference(tabId, isNew, mine && mine.label);
+  if (moved && state.settings.taskFocus) trackTask(tabId, tasks);
   await enforce(tabs, tasks);
   await save();
 }
@@ -937,7 +967,7 @@ const handlers = {
     return { ok: true, topic: state.settings.phoneTopic };
   },
   learn: async () => learn(),
-  async "reset-model"() { Object.assign(state, { model: PRETRAINED, lastLearn: null, wModel: 0.5 }); },
+  async "reset-model"() { Object.assign(state, { model: PRETRAINED, lastLearn: null, wModel: 0.5, lead: { model: 0, lru: 0 } }); },
   async "reset-stats"() { state.stats = freshStats(); },
   async enforce() { await enforce(); },
 };
