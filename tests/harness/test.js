@@ -236,6 +236,97 @@ async function phase(name, fn) {
     await chrome.tabs.remove(ids.tube); delete ids.tube;
   });
 
+  await phase("phone app", async () => {
+    await settings({ remote: true, maxAwake: 9, taskFocus: true });
+    const L = await import("./docs/app/link.js");
+    let s = await st();
+    let p = { id: s.settings.remoteId, key: s.settings.remoteKey };
+    check("pairing made: relay id and 256-bit key", /^sts-[a-z0-9]{20}$/.test(p.id) && p.key.length === 43, p.id);
+    const relay = "http://127.0.0.1:8812/relay/";
+    const post = async (body) => { await fetch(relay + L.toLaptop(p), { method: "POST", body }); await send({ type: "phone-check" }); await sleep(1000); };
+    const fromPhone = async (t, extra = {}, key = p.key) => post(await L.seal(key, L.command(t, extra)));
+    const toPhone = async () => {
+      const lines = (await (await fetch(relay + L.toPhone(p) + "/json?poll=1")).text()).split("\n").filter(Boolean);
+      return Promise.all(lines.map(async (l) => L.unseal(p.key, JSON.parse(l).message)));
+    };
+    const playing = () => run(() => !document.querySelector("video").paused, "tube");
+    await activate("python");
+    await fromPhone("hello");
+    await sleep(800);
+    const raw = await (await fetch(relay + L.toPhone(p) + "/json?poll=1")).text();
+    let msgs = await toPhone(), list = msgs.filter((m) => m && m.t === "state").pop();
+    check("laptop sends its tabs to the phone", list && list.tabs.some((t) => t.t.startsWith("India vs Australia")) && list.tasks.length >= 1,
+      list && list.tabs.map((t) => t.t.slice(0, 20)));
+    check("the relay only sees scrambled data", raw.length > 0 && !/India|cricket|127\.0\.0\.1:8813/.test(raw));
+    await activate("cricket");
+    await activate("python");
+    await fromPhone("sleep", { id: ids.cricket });
+    check("Sleep from the phone", await discarded("cricket") && ((await st()).asleep[String(ids.cricket)] || {}).by === "remote");
+    await fromPhone("wake", { id: ids.cricket });
+    await sleep(800);
+    check("Wake from the phone", !(await discarded("cricket")));
+    await fromPhone("url", { id: ids.cricket });
+    await sleep(800);
+    msgs = await toPhone();
+    check("Open on phone gets the address", msgs.some((m) => m && m.t === "url" && m.id === ids.cricket && m.url.endsWith("/cricket.html")));
+    await open("recipe");
+    await activate("python");
+    await fromPhone("close", { id: ids.recipe });
+    check("Close from the phone", !(await chrome.tabs.get(ids.recipe).catch(() => null)));
+    delete ids.recipe;
+    await open("tube", "http://127.0.0.1:8812/watch?v=demo123");
+    await sleep(2000);
+    await activate("python");
+    await fromPhone("pause", { id: ids.tube });
+    check("Pause a video from the phone", !(await playing()));
+    await fromPhone("play", { id: ids.tube });
+    await sleep(500);
+    check("Play it again from the phone", await playing());
+    await fromPhone("pauseAll");
+    check("Pause YouTube button pauses and sleeps it", await discarded("tube") && ((await st()).asleep[String(ids.tube)] || {}).by === "phone");
+    await chrome.tabs.remove(ids.tube); delete ids.tube;
+    await fromPhone("sleep", { id: ids.cricket }, L.newPairing().key);
+    check("a command sealed with another key is ignored", !(await discarded("cricket")));
+    const once = await L.seal(p.key, L.command("sleep", { id: ids.cricket }));
+    await post(once);
+    await chrome.tabs.reload(ids.cricket); await waitLoaded(ids.cricket); await sleep(300);
+    await post(once);
+    check("a replayed command is ignored", !(await discarded("cricket")));
+    await post(await L.seal(p.key, { ...L.command("sleep", { id: ids.cricket }), at: Date.now() - 10 * 60 * 1000 }));
+    check("a command older than 2 minutes is ignored", !(await discarded("cricket")));
+    const old = p.key;
+    await send({ type: "remote-unpair" });
+    s = await st();
+    p = { id: s.settings.remoteId, key: s.settings.remoteKey };
+    await fromPhone("sleep", { id: ids.cricket }, old);
+    check("Disconnect all phones: the old key stops working", p.key !== old && !(await discarded("cricket")));
+
+    // the phone app itself, as served by GitHub Pages
+    await open("app", "http://127.0.0.1:8812/app/#p=" + L.pairingCode(p, "http://127.0.0.1:8812/relay"));
+    await sleep(1500);
+    await send({ type: "phone-check" });
+    await sleep(2500);
+    const shown = await run(() => [...document.querySelectorAll(".tab .title")].map((e) => e.textContent), "app");
+    check("phone app shows the laptop's tabs", shown.some((t) => t.startsWith("India vs Australia")), shown);
+    check("phone app takes the key out of the address", !(await chrome.tabs.get(ids.app)).url.includes("#p="));
+    check("phone app shows tasks", await run(() => [...document.querySelectorAll("#tabs h3")].some((h) => /Travel|Study/.test(h.textContent)), "app"));
+    await run(() => { [...document.querySelectorAll(".tab")].find((c) => c.textContent.includes("India vs Australia")).querySelector(".top").click(); return true; }, "app");
+    await sleep(300);
+    check("tapping a tab in the phone app shows its actions", await run(() => {
+      const card = [...document.querySelectorAll(".tab")].find((c) => c.textContent.includes("India vs Australia"));
+      const b = card && card.classList.contains("open") && card.querySelector('[data-act="sleep"]');
+      if (b) b.click();
+      return !!b;
+    }, "app"));
+    await sleep(1000);
+    await send({ type: "phone-check" });
+    await sleep(1000);
+    check("tapping Sleep in the phone app sleeps the laptop tab", await discarded("cricket"));
+    await chrome.tabs.remove(ids.app); delete ids.app;
+    await settings({ remote: false, maxAwake: 4, taskFocus: false });
+    check("turning the phone app off stops listening", !(await chrome.alarms.get("phone")));
+  });
+
   await phase("paused video and away", async () => {
     await open("video");
     const played = await run(() => window.play(), "video");
@@ -290,6 +381,7 @@ async function phase(name, fn) {
     check("settings page loaded values", o.getElementById("shift").value !== "" && o.getElementById("sites").textContent.includes("meet.google.com"), o.getElementById("sites").textContent);
     check("phone handoff offered in the popup", d.getElementById("features").textContent.includes("Pause and sleep YouTube here"));
     check("phone handoff set-up in Settings", !!o.getElementById("purl") && o.body.textContent.includes("MacroDroid"));
+    check("phone app section in Settings", !!o.getElementById("remote") && !!o.getElementById("qr") && typeof document.getElementById("opt").contentWindow.qrcode === "function");
     check("no errors in popup or settings", errs.length === 0, errs);
     log("popup features:", [...d.querySelectorAll("#features .feat")].map((e) => e.querySelector("b").textContent + " | " + (e.querySelector(".now") || {}).textContent).join(" || "));
     for (const id of ["pop", "opt"]) { const f = document.getElementById(id); f.style.height = f.contentDocument.documentElement.scrollHeight + "px"; }
