@@ -1,8 +1,19 @@
 # Smart Tab Saver
  
-A Chrome extension that keeps only the tabs you need awake, using a policy learned from Belady's optimal algorithm, plus task focus, predictive wake, away and handoff, green mode and call mode.
+A Chrome extension that keeps only the tabs you need awake, choosing which tabs to put to sleep with a policy learned from Belady's optimal page-replacement algorithm, and a phone app to see and control your laptop's tabs from your phone.
 
-Manifest V3 · Chrome 116 or later · plain JavaScript ES modules, no build step and nothing to install (one small QR code library is included).
+Manifest V3 · Chrome 116 or later · plain JavaScript ES modules, no build step and nothing to install (one small QR code library is included) · phone app for Android and iPhone at **[rajveer-lab.github.io/oschromium/app](https://rajveer-lab.github.io/oschromium/app/)**
+
+**What you get**
+
+- **Fewer tabs eating memory.** Only as many websites as you choose stay loaded (8 by default); the rest sleep in the tab strip and reload when you click them.
+- **Smart choices.** A small model trained to imitate the optimal algorithm picks which tab sleeps, LRU steps in when the model isn't sure, and the popup shows how you're doing against plain LRU.
+- **Tasks.** Tabs are grouped into tasks such as "Travel · Goa"; a task you've left sleeps together.
+- **Context.** Fewer tabs stay awake on battery, during a video call or while you're away; heading for the tab bar wakes the tab you'll want next.
+- **Your phone.** Opening YouTube on your phone pauses it on the laptop, and the phone app lets you sleep, wake, close, pause or open your laptop's tabs.
+- **Private.** Everything is worked out on your computer; what goes to your phone is encrypted end to end.
+
+**Contents:** [Demo](#demo) · [Install](#install) · [The idea](#the-idea-tabs-are-pages) · [How it picks the tab to sleep](#how-it-picks-the-tab-to-sleep) · [Smart features](#smart-features) · [Phone app](#phone-app) · [The popup](#the-popup) · [Results](#results) · [Privacy and permissions](#privacy-and-permissions) · [Tests](#tests) · [Project structure](#project-structure) · [Authors](#authors)
 
 ## Demo
 
@@ -10,7 +21,22 @@ Manifest V3 · Chrome 116 or later · plain JavaScript ES modules, no build step
 
 **[Watch the full demo (4:21)](https://drive.google.com/file/d/1zC7HcSF-0APsv2wK4xu38vv_f1qBksJv/view?usp=sharing)**
 
-The video walks through the awake-tab limit, reloads compared with LRU, task focus, predictive wake, call mode, green mode and "Learn from my browsing". It was recorded in Chromium with the extension loaded unpacked. The websites are local stand-in pages, the grace period and task timer were shortened so effects show within seconds, and the battery event was sent by the demo script (the recording machine has no battery).
+The video walks through the awake-tab limit, reloads compared with LRU, task focus, predictive wake, call mode, green mode and "Learn from my browsing". Phone handoff and the phone app came later and aren't in the video. It was recorded in Chromium with the extension loaded unpacked. The websites are local stand-in pages, the grace period and task timer were shortened so effects show within seconds, and the battery event was sent by the demo script (the recording machine has no battery).
+
+## Install
+
+1. Get the code, either way:
+   - **Download:** on this page click **Code → Download ZIP**, then unzip it.
+   - **Clone:**
+     ```bash
+     git clone https://github.com/rajveer-lab/oschromium.git
+     ```
+2. Open `chrome://extensions` and turn on **Developer mode**.
+3. Click **Load unpacked** and choose the folder that has `manifest.json` directly inside it. On Windows, unzipping often makes `oschromium-main\oschromium-main`: pick the inner one.
+4. Click the Smart Tab Saver icon in the toolbar (pin it from the puzzle-piece menu) to open the popup.
+5. Optional: connect your phone, see [Phone app](#phone-app).
+
+**Updating:** get the new code into the same folder (`git pull`, or unzip over it), then click the reload arrow on Smart Tab Saver in `chrome://extensions`. If you load a different folder instead, remove the old copy first.
 
 ## The idea: tabs are pages
 
@@ -150,25 +176,16 @@ Everything is worked out on your computer and kept in `chrome.storage.local`. Fo
 | `tabGroups` | Showing tasks as tab groups (optional) |
 | Site access (optional, asked for when needed) | Typing protection and predictive wake (all sites); call mode (the call sites); phone handoff and the phone app (youtube.com and ntfy.sh); grid carbon (api.electricitymap.org) |
 
-## Install
-
-1. Download or clone this repository:
-   ```bash
-   git clone https://github.com/rajveer-lab/oschromium.git
-   ```
-2. Open `chrome://extensions` and turn on **Developer mode**.
-3. Click **Load unpacked** and choose the `oschromium` folder.
-4. Click the Smart Tab Saver icon in the toolbar (pin it from the puzzle-piece menu) to open the popup.
 
 ## Tests
 
-The end-to-end suite loads the extension into real Chromium under Xvfb (Linux) and checks every feature: the limit, task detection, task focus, predictive wake, call mode, green mode, handoff, phone handoff and the phone app (with a local stand-in for the relay, including the app itself, its encryption and its refusal of wrong-key, stale and replayed commands), paused video and away, tab groups, and the popup and settings pages.
+The end-to-end suite (82 checks) loads the extension into real Chromium under Xvfb (Linux) and checks every feature: the limit, task detection, task focus, predictive wake, call mode, green mode, handoff, phone handoff and the phone app (with a local stand-in for the relay, including the app itself, its encryption and its refusal of wrong-key, stale and replayed commands), paused video and away, tab groups, and the popup and settings pages.
 
 ```bash
 tests/build.sh && tests/run.sh
 ```
 
-`tests/build.sh` builds a test copy in `tests/ext` with local stand-ins for the call sites and the carbon API. Set `CHROME` to a Chromium or Chrome for Testing binary if it isn't found; branded Google Chrome no longer loads unpacked extensions from the command line.
+`tests/build.sh` builds a test copy in `tests/ext` with local stand-ins for the call sites, the carbon API and the ntfy relay; `tests/collector.py` serves them, and the phone app, while the tests run. Set `CHROME` to a Chromium or Chrome for Testing binary if it isn't found; branded Google Chrome no longer loads unpacked extensions from the command line.
 
 ## Project structure
 
