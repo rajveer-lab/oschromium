@@ -18,6 +18,7 @@ export const CARBON_ORIGIN = "https://api.electricitymap.org/*";
 export const PHONE_RELAY = "https://ntfy.sh";
 export const VIDEO_SITES = ["youtube.com"];
 export const PHONE_ORIGINS = ["https://ntfy.sh/*", "https://*.youtube.com/*"];
+export const PHONE_APP_URL = "https://rajveer-lab.github.io/oschromium/app/";
 
 export const DEFAULT_SETTINGS = {
   maxAwake: 8,
@@ -38,6 +39,9 @@ export const DEFAULT_SETTINGS = {
   handoff: false,         // share what's playing with your other Chrome devices
   phoneHandoff: false,    // pause and sleep YouTube here when it opens on your phone
   phoneTopic: "",         // the private relay topic your phone publishes to
+  remote: false,          // the phone app may see and control this browser's tabs
+  remoteId: "",           // pairing with the phone app: relay topic id...
+  remoteKey: "",          // ...and the encryption key (both in the QR code)
   green: true,
   carbonKey: "",
   carbonZone: "",
@@ -49,7 +53,7 @@ export const REASON = {
   model: "learned model", lru: "LRU fallback", you: "you", chrome: "Chrome",
   task: "task finished", media: "paused video", handoff: "playing on another device",
   call: "call mode", green: "green mode", away: "you were away",
-  phone: "playing on your phone",
+  phone: "playing on your phone", remote: "you, from your phone",
 };
 
 const key = (id) => String(id);
