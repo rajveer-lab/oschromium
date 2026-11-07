@@ -4,3 +4,7 @@ tests/extid
 tests/*.log
 tests/log.jsonl
 tests/*.png
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
