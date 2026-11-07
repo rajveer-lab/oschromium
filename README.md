@@ -143,4 +143,5 @@ The feature set and the OPT labelling come from the companion Python project, [L
 
 ## Authors
 
-Saharsh Indurkar, Aryan Upadhyay and Rajveer Singh Chopra. Course project for BCSE303P Operating Systems, School of Computer Science and Engineering (SCOPE), Vellore Institute of Technology, under the guidance of Dr. Ezhil Arasi V.
+Saharsh Indurkar, Aryan Upadhyay and Rajveer Singh Chopra. Course project for BCSE303P Operating Systems, School of Computer Science and Engineering (SCOPE), Vellore Institute of Technology, under the guidance of Dr. Ezhil Arasi V. 
+
