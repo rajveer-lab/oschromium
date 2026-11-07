@@ -2,7 +2,7 @@
  
 A Chrome extension that keeps only the tabs you need awake, using a policy learned from Belady's optimal algorithm, plus task focus, predictive wake, away and handoff, green mode and call mode.
 
-Manifest V3 · Chrome 116 or later · plain JavaScript ES modules, no build step and no dependencies.
+Manifest V3 · Chrome 116 or later · plain JavaScript ES modules, no build step and nothing to install (one small QR code library is included).
 
 ## Demo
 
@@ -86,11 +86,37 @@ How it works: the extension listens to its private topic on the relay over a Web
 
 The button in the popup retrains the model on your own tab switches (the last 5,000). Your history is replayed under OPT, every moment a tab had to sleep becomes a labelled example, and a new logistic regression is fitted by Newton's method. The new model is kept only if, replayed on that same history, it causes no more reloads than the current one. It needs more distinct tabs than your limit and at least 100 training examples, and it all stays on your computer. Settings has a button to go back to the pretrained model.
 
+## Phone app
+
+See the tabs open on your laptop from your phone, and control them from there. It works on Android and iPhone, with nothing to install from an app store: it's a web app at **[rajveer-lab.github.io/oschromium/app](https://rajveer-lab.github.io/oschromium/app/)** that you add to your home screen.
+
+| On your phone you see | And can |
+|---|---|
+| Every website open on the laptop, grouped into your tasks | **Sleep** a tab, to free the laptop's memory |
+| Which tabs are awake, asleep, playing or on screen | **Wake** a sleeping tab, so it's ready when you sit down |
+| How many websites are awake out of the limit | **Pause** or **Play** a video |
+| | **Open on phone**, to carry on reading there |
+| | **Close** a tab (tap twice) |
+| | **Pause YouTube on my laptop**, one big button |
+
+**Connect your phone (once):**
+
+1. On the laptop, click the Smart Tab Saver icon, then **Phone app** at the bottom of the popup.
+2. Tick **Let my phone see and control the tabs in this browser**. A QR code appears.
+3. Scan the QR code with your phone's camera. The app opens, already connected.
+4. Add it to your home screen:
+   - **Android:** in Chrome's menu ⋮ choose **Install app** or **Add to Home screen**.
+   - **iPhone:** tap **Copy pairing code** in the app, then Share → **Add to Home Screen**. Open the new icon and paste the code once (iPhone keeps home-screen apps separate from Safari).
+
+**Disconnect all phones** in Settings makes a new key, so every phone connected before stops working until it scans the new QR code.
+
+**Privacy.** The QR code holds a random encryption key, in the part of the address after `#`, which browsers never send to a server. The laptop and the phone encrypt everything with it (AES-GCM) before it goes through the free [ntfy.sh](https://ntfy.sh) relay, so the relay only ever passes scrambled data. The phone gets tab titles (cut to 90 characters) and site names; a full address is sent only when you tap **Open on phone**. The laptop ignores commands that don't decrypt with the key, that are older than 2 minutes or that it has seen before. It sends tab lists only while the app is open, and for 5 minutes after.
+
 ## The popup
 
 From top to bottom: how many websites are awake out of the limit and how much RAM is free; the tasks found in your tabs; the "Keep awake at most" slider; reloads with Smart Tab Saver next to plain LRU; the trust bar between the model and LRU; the tabs next in line to sleep, with the model's score; the sleeping tabs, each with the reason it slept; the five smart features; and "Learn from my browsing". The switch in the header pauses the extension.
 
-Settings (the link at the bottom of the popup) holds the protections, the confidence threshold, excluded sites, the task timer, tab groups, the away and paused-video timers, handoff, phone handoff (your phone's link, a test signal and a new link), the Electricity Maps key and zone, and buttons to reset the model or the reload counts.
+Settings (the link at the bottom of the popup) holds the protections, the confidence threshold, excluded sites, the task timer, tab groups, the away and paused-video timers, handoff, phone handoff (your phone's link, a test signal and a new link), the phone app's QR code, the Electricity Maps key and zone, and buttons to reset the model or the reload counts. **Phone app**, also at the bottom of the popup, goes straight to the QR code.
 
 ## Results
 
@@ -110,7 +136,7 @@ From our Review 3 report: a trace-driven simulation over 30 synthetic task-struc
 
 ## Privacy and permissions
 
-Everything is worked out on your computer and kept in `chrome.storage.local`. Three things leave it, and only if you turn them on: handoff shares a scrambled code of the playing video's address (never the address) through Chrome sync, phone handoff listens for your phone's signal on your private ntfy.sh topic, and green mode asks Electricity Maps for your zone's grid carbon if you add a key. The page scripts never read or send what you type or what's on the page.
+Everything is worked out on your computer and kept in `chrome.storage.local`. Four things leave it, and only if you turn them on: handoff shares a scrambled code of the playing video's address (never the address) through Chrome sync, phone handoff listens for your phone's signal on your private ntfy.sh topic, the phone app exchanges your tab list and commands with your phone, encrypted end to end, through ntfy.sh, and green mode asks Electricity Maps for your zone's grid carbon if you add a key. The page scripts never read or send what you type or what's on the page.
 
 | Permission | Used for |
 |---|---|
@@ -122,7 +148,7 @@ Everything is worked out on your computer and kept in `chrome.storage.local`. Th
 | `idle` | Noticing when you're away |
 | `offscreen` | Reading the battery status for green mode |
 | `tabGroups` | Showing tasks as tab groups (optional) |
-| Site access (optional, asked for when needed) | Typing protection and predictive wake (all sites); call mode (the call sites); phone handoff (youtube.com and ntfy.sh); grid carbon (api.electricitymap.org) |
+| Site access (optional, asked for when needed) | Typing protection and predictive wake (all sites); call mode (the call sites); phone handoff and the phone app (youtube.com and ntfy.sh); grid carbon (api.electricitymap.org) |
 
 ## Install
 
@@ -136,7 +162,7 @@ Everything is worked out on your computer and kept in `chrome.storage.local`. Th
 
 ## Tests
 
-The end-to-end suite loads the extension into real Chromium under Xvfb (Linux) and checks every feature: the limit, task detection, task focus, predictive wake, call mode, green mode, handoff, phone handoff (with a local stand-in for the relay), paused video and away, tab groups, and the popup and settings pages.
+The end-to-end suite loads the extension into real Chromium under Xvfb (Linux) and checks every feature: the limit, task detection, task focus, predictive wake, call mode, green mode, handoff, phone handoff and the phone app (with a local stand-in for the relay, including the app itself, its encryption and its refusal of wrong-key, stale and replayed commands), paused video and away, tab groups, and the popup and settings pages.
 
 ```bash
 tests/build.sh && tests/run.sh
@@ -160,6 +186,9 @@ tests/build.sh && tests/run.sh
 | `content-call.js`, `content-call-relay.js` | Notice a call's microphone and camera turning on or off |
 | `offscreen.html`, `offscreen.js` | Battery status for green mode |
 | `tests/` | `build.sh`, `run.sh`, the test runner (`harness/`) and local test pages (`site/`) |
+| `docs/app/` | The phone app (installable web app): `index.html`, `app.js`, `app.css`, `link.js` (pairing and encryption, shared with the extension), `sw.js`, manifest and icons |
+| `docs/index.html` | The project's GitHub Pages home |
+| `lib/qrcode.js` | QR code generator for the pairing code ([qrcode-generator](https://www.npmjs.com/package/qrcode-generator) 1.4.4, MIT) |
 | `docs/demo/` | The demo video and its preview |
 
 ## Related
