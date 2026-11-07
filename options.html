@@ -21,6 +21,8 @@
   .pair { display: flex; gap: 16px; align-items: flex-start; }
   .pair canvas { flex: none; width: 200px; height: 200px; border-radius: 10px; background: #fff; }
   @media (max-width: 520px) { .pair { flex-direction: column; } }
+  .code-box { margin: 10px 0 2px; display: grid; gap: 4px; }
+  .code { font: 700 26px ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.08em; }
 </style>
 </head>
 <body>
@@ -80,11 +82,14 @@
       <div class="pair">
         <canvas id="qr" width="400" height="400" aria-label="QR code that connects the phone app"></canvas>
         <div class="hint">
-          <b>Scan this with your phone's camera.</b> The Smart Tab Saver app opens, already connected to this browser.<br><br>
+          <b>Android app:</b> type the code below in the app.<br><br>
+          <b>Or scan this with your phone's camera.</b> The Smart Tab Saver web app opens, already connected to this browser.<br><br>
           <b>Android:</b> in Chrome's menu ⋮ choose <b>Install app</b> or <b>Add to Home screen</b>.<br>
           <b>iPhone:</b> in the app tap <b>Copy pairing code</b>, then Share → <b>Add to Home Screen</b>. Open the new icon and paste the code once.
         </div>
       </div>
+      <div class="code-box"><span class="hint">Or type this code in the Smart Tab Saver Android app:</span>
+        <div class="actions"><b id="rcode" class="code">…</b><button type="button" class="small" id="rnewcode">New code</button><span class="hint" id="rcodeinfo"></span></div></div>
       <div class="actions"><button type="button" class="small" id="rcopy">Copy link</button><button type="button" class="small" id="runpair">Disconnect all phones</button><span class="hint" id="rout"></span></div>
     </div>
   </section>
