@@ -14,13 +14,15 @@
 //     are most likely to open next, before you click it.
 //   - Away and handoff: a video you paused and left, stepping away from the
 //     computer, or the same video playing on another of your Chrome devices
-//     lets tabs sleep sooner.
+//     lets tabs sleep sooner. Opening YouTube on your phone pauses YouTube
+//     here and puts its tab to sleep (phone handoff).
 //   - Green mode: on battery, with a busy CPU or a high-carbon power grid,
 //     fewer tabs stay awake.
 //   - Call mode: during a video call in the browser, fewer tabs stay awake.
 
 import { PRETRAINED, newMeta, touch, features, score, optDataset, fitLogReg, replay } from "./policy.js";
-import { DEFAULT_SETTINGS, CALL_SITES, CARBON_ORIGIN, counts, sleepable, limits, isAway } from "./rules.js";
+import { DEFAULT_SETTINGS, CALL_SITES, CARBON_ORIGIN, PHONE_RELAY, PHONE_ORIGINS, counts, sleepable, limits, isAway,
+  isVideoSite, isExcluded } from "./rules.js";
 import { clusterTabs } from "./tasks.js";
 
 const LOG_CAP = 5000;
@@ -67,6 +69,7 @@ async function load() {
   for (const k of PER_TAB) if (!state[k] || Array.isArray(state[k])) state[k] = {};
   if (!state.task || !Array.isArray(state.task.shelves)) state.task = { left: null, shelves: [] };
   if (!state.groups) state.groups = {};        // tab group id -> label, for groups we made
+  if (!state.phone) state.phone = { seen: [], last: null };   // phone handoff: signals seen, last one handled
   if (!state.deviceId) state.deviceId = crypto.randomUUID();
   return state;
 }
@@ -364,6 +367,143 @@ async function onRemotePlaying(v) {
   }
 }
 
+// --- phone handoff ---------------------------------------------------------
+
+// Opening YouTube on your phone makes an automation app there publish a
+// signal to your private topic on the relay. While the service worker runs it
+// listens on a WebSocket (a ping every 20 s keeps it running); an alarm every
+// 30 s reconnects it and polls the relay in case a signal was missed. On a
+// signal, any video playing on YouTube here is paused, the time it stopped at
+// goes into the address, and the tab sleeps unless you're looking at it.
+
+const PHONE_MAX_AGE = 120;                  // seconds: older signals are ignored
+const PHONE_TEST = "test from Smart Tab Saver";
+let phoneSocket = null, phonePing = null;
+
+function newTopic() {
+  const abc = "abcdefghijkmnopqrstuvwxyz23456789";
+  return "sts-" + [...crypto.getRandomValues(new Uint8Array(20))].map((b) => abc[b % abc.length]).join("");
+}
+
+async function phoneOn() {
+  return state.settings.phoneHandoff && await chrome.permissions.contains({ origins: PHONE_ORIGINS });
+}
+
+async function syncPhone() {
+  const s = state;
+  if (s.settings.phoneHandoff && !s.settings.phoneTopic) s.settings.phoneTopic = newTopic();
+  if (!(await phoneOn())) {
+    closePhone();
+    await chrome.alarms.clear("phone");
+    return;
+  }
+  if (!(await chrome.alarms.get("phone"))) chrome.alarms.create("phone", { periodInMinutes: 0.5 });
+  openPhone(s.settings.phoneTopic);
+}
+
+function closePhone() {
+  clearInterval(phonePing);
+  phonePing = null;
+  if (phoneSocket) {
+    phoneSocket.onclose = null;
+    phoneSocket.close();
+    phoneSocket = null;
+  }
+}
+
+function openPhone(topic) {
+  if (phoneSocket && phoneSocket.topic === topic && phoneSocket.readyState <= WebSocket.OPEN) return;
+  closePhone();
+  let ws;
+  try { ws = new WebSocket(`${PHONE_RELAY.replace(/^http/, "ws")}/${topic}/ws`); } catch { return; }
+  ws.topic = topic;
+  ws.onmessage = (e) => {
+    let m;
+    try { m = JSON.parse(e.data); } catch { return; }
+    if (m.event === "message") serial(async () => { await load(); await onPhoneSignal(m); await save(); });
+  };
+  ws.onclose = () => {                       // the next alarm reconnects
+    if (phoneSocket !== ws) return;
+    clearInterval(phonePing);
+    phoneSocket = phonePing = null;
+  };
+  phoneSocket = ws;
+  phonePing = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send("ping"); }, 20000);
+}
+
+// Asks the relay for the last two minutes of signals. Runs outside the event
+// queue so tabs never wait on the network.
+async function pollPhone(force = false) {
+  await serial(load);
+  if (!(await phoneOn()) || (!force && phoneSocket && phoneSocket.readyState === WebSocket.OPEN)) return 0;
+  let text = "";
+  try {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 10000);
+    const since = Math.floor(Date.now() / 1000) - PHONE_MAX_AGE;
+    const r = await fetch(`${PHONE_RELAY}/${state.settings.phoneTopic}/json?poll=1&since=${since}`,
+      { cache: "no-store", signal: ctl.signal });
+    clearTimeout(timer);
+    if (r.ok) text = await r.text();
+  } catch { return 0; }
+  const msgs = [];
+  for (const line of text.split("\n")) {
+    try { const m = JSON.parse(line); if (m.event === "message") msgs.push(m); } catch { /* blank line */ }
+  }
+  if (msgs.length) await serial(async () => { await load(); for (const m of msgs) await onPhoneSignal(m); await save(); });
+  return msgs.length;
+}
+
+async function onPhoneSignal(m) {
+  const s = state, p = s.phone;
+  if (!m.id || p.seen.includes(m.id)) return;
+  p.seen.push(m.id);
+  if (p.seen.length > 30) p.seen.shift();
+  if (Date.now() / 1000 - (m.time || 0) > PHONE_MAX_AGE) return;
+  let paused = 0, slept = 0;
+  for (const tb of await chrome.tabs.query({})) {
+    if (tb.discarded || !isVideoSite(tb.url)) continue;
+    let r = null;
+    try {
+      [{ result: r }] = await chrome.scripting.executeScript({ target: { tabId: tb.id }, world: "MAIN", func: pauseVideo });
+    } catch { continue; }
+    if (!r || !r.paused) continue;
+    paused += 1;
+    if (tb.active || (tb.pinned && s.settings.protectPinned) || isExcluded(tb.url, s)) continue;
+    if (await sleepTab(await chrome.tabs.get(tb.id), "phone")) slept += 1;
+  }
+  p.last = { at: Date.now(), paused, slept, test: m.message === PHONE_TEST };
+}
+
+// Runs inside the video page: pause whatever is playing and put the time in
+// the address (YouTube's t=), so the tab starts there again when it wakes.
+function pauseVideo() {
+  const playing = [...document.querySelectorAll("video")].filter((v) => !v.paused && !v.ended);
+  if (!playing.length) return { paused: 0 };
+  for (const v of playing) v.pause();
+  const t = Math.floor(playing[0].currentTime);
+  try {
+    const u = new URL(location.href);
+    if (u.pathname === "/watch" && t > 0) {
+      u.searchParams.set("t", t + "s");
+      history.replaceState(history.state, "", u.href);
+    }
+  } catch (e) { /* keep the address as it is */ }
+  return { paused: playing.length, t };
+}
+
+async function phoneTest() {
+  await serial(load);
+  if (!(await phoneOn())) return { ok: false, error: "Turn on phone handoff first." };
+  try {
+    const r = await fetch(`${PHONE_RELAY}/${state.settings.phoneTopic}`, { method: "POST", body: PHONE_TEST });
+    if (!r.ok) return { ok: false, error: `The relay answered HTTP ${r.status}.` };
+  } catch (e) {
+    return { ok: false, error: "Couldn't reach the relay: " + String(e.message || e) };
+  }
+  if (!(phoneSocket && phoneSocket.readyState === WebSocket.OPEN)) setTimeout(() => pollPhone(true), 1500);
+  return { ok: true };
+}
+
 // --- green mode ------------------------------------------------------------
 
 async function syncOffscreen() {
@@ -630,6 +770,7 @@ const handlers = {
     await syncScripts();
     await syncOffscreen();
     await syncIdle();
+    await syncPhone();
     const tabs = await chrome.tabs.query({});
     const tasks = s.settings.taskFocus ? taskClusters(tabs) : [];
     if (before.tabGroups !== s.settings.tabGroups || s.settings.tabGroups) await syncGroups(tabs, tasks);
@@ -656,6 +797,11 @@ const handlers = {
     state.task.shelves = state.task.shelves.filter((sh) => !sh.ids.some((id) => msg.ids.includes(id)));
   },
   async refresh() { await sampleCpu(); },
+  async "phone-new-topic"() {
+    state.settings.phoneTopic = newTopic();
+    await syncPhone();
+    return { ok: true, topic: state.settings.phoneTopic };
+  },
   learn: async () => learn(),
   async "reset-model"() { Object.assign(state, { model: PRETRAINED, lastLearn: null, wModel: 0.5 }); },
   async "reset-stats"() { state.stats = freshStats(); },
@@ -663,6 +809,11 @@ const handlers = {
 };
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  if (msg && (msg.type === "phone-test" || msg.type === "phone-check")) {   // these wait on the network
+    (msg.type === "phone-test" ? phoneTest() : pollPhone(true).then((n) => ({ ok: true, signals: n })))
+      .then(reply, (e) => reply({ ok: false, error: String(e) }));
+    return true;
+  }
   if (msg && msg.type === "carbon-test") {
     refreshCarbon(true).then((r) => reply({ ok: true, carbon: r }), (e) => reply({ ok: false, error: String(e) }));
     return true;
@@ -693,14 +844,15 @@ if (chrome.idle) {
   }));
 }
 
-chrome.permissions.onAdded.addListener(() => serial(async () => { await load(); await syncScripts(); await save(); }));
-chrome.permissions.onRemoved.addListener(() => serial(async () => { await load(); await syncScripts(); await save(); }));
+chrome.permissions.onAdded.addListener(() => serial(async () => { await load(); await syncScripts(); await syncPhone(); await save(); }));
+chrome.permissions.onRemoved.addListener(() => serial(async () => { await load(); await syncScripts(); await syncPhone(); await save(); }));
 
 async function setUp(installed = false) {
   chrome.alarms.create("enforce", { periodInMinutes: 1 });
   await syncScripts(installed);
   await syncOffscreen();
   await syncIdle();
+  await syncPhone();
   await sampleCpu();
 }
 
@@ -725,6 +877,11 @@ chrome.runtime.onInstalled.addListener(() => serial(async () => {
 }));
 
 chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === "phone") {
+    serial(async () => { await load(); await syncPhone(); await save(); });
+    pollPhone();
+    return;
+  }
   if (a.name !== "enforce") return;
   serial(async () => {
     await load();
