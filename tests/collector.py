@@ -1,6 +1,8 @@
 import http.server, json, os, sys, time, urllib.parse
 LOG = sys.argv[1]
 SITE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "site")
+APP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "app")
+TYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".webmanifest": "application/manifest+json"}
 RELAY = []      # stand-in for the ntfy relay: every message published, oldest first
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -41,6 +43,28 @@ class H(http.server.BaseHTTPRequestHandler):
                 self._json(self._publish(parts[2], "triggered")); return
             if parts[-1] == "json":            # every message, however old: the extension must skip stale ones
                 self._json([m for m in RELAY if m["topic"] == parts[2]], lines=True); return
+            if parts[-1] == "sse":             # new messages as they come, as ntfy streams them
+                self.send_response(200); self._cors()
+                self.send_header("Content-Type", "text/event-stream"); self.send_header("Cache-Control", "no-cache"); self.end_headers()
+                seen, quiet = len(RELAY), 0
+                try:
+                    while True:
+                        while seen < len(RELAY):
+                            m = RELAY[seen]; seen += 1
+                            if m["topic"] == parts[2]:
+                                self.wfile.write(("data: " + json.dumps(m) + "\n\n").encode()); self.wfile.flush()
+                        time.sleep(0.2); quiet += 1
+                        if quiet % 75 == 0:
+                            self.wfile.write(b": keepalive\n\n"); self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+            self.send_response(404); self.end_headers(); return
+        if u.path.startswith("/app/"):         # the phone app, as GitHub Pages serves it
+            name = u.path[len("/app/"):] or "index.html"
+            f = os.path.join(APP, os.path.basename(name))
+            if os.path.isfile(f):
+                self.send_response(200); self.send_header("Content-Type", TYPES.get(os.path.splitext(f)[1], "application/octet-stream")); self.end_headers()
+                self.wfile.write(open(f, "rb").read()); return
             self.send_response(404); self.end_headers(); return
         if u.path == "/watch":                 # a video page at YouTube's address shape, for t=
             self.send_response(200); self.send_header("Content-Type", "text/html"); self.end_headers()
