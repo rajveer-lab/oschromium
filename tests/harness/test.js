@@ -322,6 +322,24 @@ async function phase(name, fn) {
     await send({ type: "phone-check" });
     await sleep(1000);
     check("tapping Sleep in the phone app sleeps the laptop tab", await discarded("cricket"));
+
+    // connecting with the short code shown in Settings, as in the Android app
+    const made = await send({ type: "remote-code" });
+    check("Settings makes a short code", made.ok && /^[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$/.test(made.code) && made.exp > Date.now(), made);
+    const ch = await L.codeChannel(made.code);
+    const left = (await (await fetch(relay + ch.topic + "/json?poll=1")).text()).split("\n").filter(Boolean);
+    const found = await L.unseal(ch.key, JSON.parse(left.pop()).message);
+    check("the code leads to this browser's pairing, sealed", found && L.parsePairing(found.code).key === p.key && !left.join().includes(p.key));
+    check("a wrong code finds nothing", !(await L.unseal((await L.codeChannel("AAAA-BBBB")).key, JSON.parse((await (await fetch(relay + ch.topic + "/json?poll=1")).text()).split("\n").filter(Boolean).pop()).message)));
+    await run(() => { localStorage.clear(); location.href = "/app/?relay=" + encodeURIComponent("http://127.0.0.1:8812/relay"); return true; }, "app");
+    await sleep(1500);
+    check("a new phone asks for the code", await run(() => !document.getElementById("unpaired").hidden && document.getElementById("paired").hidden, "app"));
+    await run((code) => { const i = document.getElementById("short"); i.value = code.replace("-", "").toLowerCase(); i.dispatchEvent(new Event("input")); document.getElementById("connect-code").click(); return true; }, "app", made.code);
+    await sleep(2000);
+    await send({ type: "phone-check" });
+    await sleep(2500);
+    const shown2 = await run(() => [...document.querySelectorAll(".tab .title")].map((e) => e.textContent), "app");
+    check("typing the code connects the app and shows the tabs", shown2.some((t) => t.startsWith("India vs Australia")), shown2);
     await chrome.tabs.remove(ids.app); delete ids.app;
     await settings({ remote: false, maxAwake: 4, taskFocus: false });
     check("turning the phone app off stops listening", !(await chrome.alarms.get("phone")));
