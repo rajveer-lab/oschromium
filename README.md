@@ -51,11 +51,27 @@ Each one can be switched on or off in the popup, with a "Why?" that explains it.
 |---|---|---|
 | **Task focus** | Groups your tabs into tasks from their titles, site names and addresses (TF-IDF and average-linkage clustering, on this computer). When you've left a task for 2 minutes and 3 tab switches, its tabs sleep together. Tasks can also be shown as Chrome tab groups. | On |
 | **Predictive wake** | Moving the mouse quickly up toward the tab bar wakes the sleeping tab you'll most likely open next: the one you usually go to from this tab, or the latest tab of the same task. Pointing at a sleeping tab in the popup wakes it too. | Off (needs site permission) |
-| **Away & handoff** | A video you paused and left for 10 minutes sleeps, and half as many tabs stay awake while you're away (5 minutes without input, or a locked screen). Optional handoff: when the same video starts on your other Chrome device, the paused one here sleeps. | On (handoff off) |
+| **Away & handoff** | A video you paused and left for 10 minutes sleeps, and half as many tabs stay awake while you're away (5 minutes without input, or a locked screen). Optional handoff: when the same video starts on your other Chrome device, the paused one here sleeps. Optional phone handoff: opening YouTube on your phone pauses YouTube here and puts its tab to sleep (see below). | On (both handoffs off) |
 | **Green mode** | On battery, with the CPU at 75% or more, or with a high-carbon power grid (optional, free [Electricity Maps](https://www.electricitymaps.com/) key), the limit drops to three quarters and the model may act on lower confidence. | On |
 | **Call mode** | During a video call in the browser (Meet, Zoom, Teams, Webex, Slack, Discord, Whereby), half as many tabs stay awake. It only notices that the call site turned your microphone or camera on or off. | Off (needs permission for the call sites) |
 
 When several modes apply, the strictest limit wins, and the limit never drops below 2.
+
+### Phone handoff: YouTube from laptop to phone
+
+Watching YouTube on the laptop and then opening the YouTube app on your phone pauses the laptop's video within a few seconds and puts its tab to sleep. When you go back to the tab, the video starts again where it was paused. If you're looking at the YouTube tab at that moment, the video is paused but the tab stays awake.
+
+Chrome on phones doesn't run extensions, and YouTube doesn't tell other devices what you play, so a small automation on the phone sends the signal:
+
+1. **Turn it on.** In the popup, under Away & handoff, tick "Pause and sleep YouTube here when I open YouTube on my phone", or tick it in Settings and click **Save**. Settings then shows **your phone's link**, a private address on the free [ntfy.sh](https://ntfy.sh) relay. Click **Copy**.
+2. **Set up the phone (Android).** Install the free [MacroDroid](https://www.macrodroid.com/) app and add a macro:
+   - **Trigger:** Application Launched → YouTube
+   - **Action:** HTTP Request, method GET, URL: your phone's link
+   
+   Save it, and turn off battery optimisation for MacroDroid so it can run in the background.
+3. **Try it.** Play a YouTube video on the laptop, switch to another tab and open YouTube on your phone. The laptop's video pauses and its tab sleeps, labelled "playing on your phone". **Send a test signal** in Settings does the same from the laptop, without the phone.
+
+How it works: the extension listens to its private topic on the relay over a WebSocket and checks the relay every 30 seconds as a backstop. On a signal less than 2 minutes old, it pauses any video playing on YouTube, puts the time it stopped at in the address (`t=`), and puts the tab to sleep. Only the signal goes through the relay, never what you watch. Anyone with the link could pause YouTube on your laptop, so keep it to yourself; **New link** in Settings replaces it.
 
 ### Learn from my browsing
 
@@ -65,7 +81,7 @@ The button in the popup retrains the model on your own tab switches (the last 5,
 
 From top to bottom: how many websites are awake out of the limit and how much RAM is free; the tasks found in your tabs; the "Keep awake at most" slider; reloads with Smart Tab Saver next to plain LRU; the trust bar between the model and LRU; the tabs next in line to sleep, with the model's score; the sleeping tabs, each with the reason it slept; the five smart features; and "Learn from my browsing". The switch in the header pauses the extension.
 
-Settings (the link at the bottom of the popup) holds the protections, the confidence threshold, excluded sites, the task timer, tab groups, the away and paused-video timers, handoff, the Electricity Maps key and zone, and buttons to reset the model or the reload counts.
+Settings (the link at the bottom of the popup) holds the protections, the confidence threshold, excluded sites, the task timer, tab groups, the away and paused-video timers, handoff, phone handoff (your phone's link, a test signal and a new link), the Electricity Maps key and zone, and buttons to reset the model or the reload counts.
 
 ## Results
 
@@ -85,7 +101,7 @@ From our Review 3 report: a trace-driven simulation over 30 synthetic task-struc
 
 ## Privacy and permissions
 
-Everything is worked out on your computer and kept in `chrome.storage.local`. Two things leave it, and only if you turn them on: handoff shares a scrambled code of the playing video's address (never the address) through Chrome sync, and green mode asks Electricity Maps for your zone's grid carbon if you add a key. The page scripts never read or send what you type or what's on the page.
+Everything is worked out on your computer and kept in `chrome.storage.local`. Three things leave it, and only if you turn them on: handoff shares a scrambled code of the playing video's address (never the address) through Chrome sync, phone handoff listens for your phone's signal on your private ntfy.sh topic, and green mode asks Electricity Maps for your zone's grid carbon if you add a key. The page scripts never read or send what you type or what's on the page.
 
 | Permission | Used for |
 |---|---|
@@ -97,7 +113,7 @@ Everything is worked out on your computer and kept in `chrome.storage.local`. Tw
 | `idle` | Noticing when you're away |
 | `offscreen` | Reading the battery status for green mode |
 | `tabGroups` | Showing tasks as tab groups (optional) |
-| Site access (optional, asked for when needed) | Typing protection and predictive wake (all sites); call mode (the call sites); grid carbon (api.electricitymap.org) |
+| Site access (optional, asked for when needed) | Typing protection and predictive wake (all sites); call mode (the call sites); phone handoff (youtube.com and ntfy.sh); grid carbon (api.electricitymap.org) |
 
 ## Install
 
@@ -111,7 +127,7 @@ Everything is worked out on your computer and kept in `chrome.storage.local`. Tw
 
 ## Tests
 
-The end-to-end suite loads the extension into real Chromium under Xvfb (Linux) and checks every feature: the limit, task detection, task focus, predictive wake, call mode, green mode, handoff, paused video and away, tab groups, and the popup and settings pages.
+The end-to-end suite loads the extension into real Chromium under Xvfb (Linux) and checks every feature: the limit, task detection, task focus, predictive wake, call mode, green mode, handoff, phone handoff (with a local stand-in for the relay), paused video and away, tab groups, and the popup and settings pages.
 
 ```bash
 tests/build.sh && tests/run.sh
