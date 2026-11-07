@@ -25,7 +25,7 @@
 import { PRETRAINED, newMeta, touch, features, score, optDataset, fitLogReg, replay } from "./policy.js";
 import { DEFAULT_SETTINGS, CALL_SITES, CARBON_ORIGIN, PHONE_RELAY, PHONE_ORIGINS, counts, sleepable, limits, isAway,
   isVideoSite, isExcluded, hostOf } from "./rules.js";
-import { MAX_AGE, newPairing, seal, unseal, toLaptop, toPhone } from "./docs/app/link.js";
+import { MAX_AGE, CODE_MINUTES, newPairing, pairingCode, newShortCode, codeChannel, seal, unseal, toLaptop, toPhone } from "./docs/app/link.js";
 import { clusterTabs } from "./tasks.js";
 
 const LOG_CAP = 5000;
@@ -911,7 +911,22 @@ const handlers = {
     state.task.shelves = state.task.shelves.filter((sh) => !sh.ids.some((id) => msg.ids.includes(id)));
   },
   async refresh() { await sampleCpu(); },
+  // A short code to type in the Android app instead of scanning the QR code.
+  async "remote-code"() {
+    if (!(await remoteOn())) return { ok: false, error: "Turn on the phone app first." };
+    const code = newShortCode(), exp = Date.now() + CODE_MINUTES * MINUTE, ch = await codeChannel(code);
+    const body = await seal(ch.key, { t: "pair", code: pairingCode(pairing(), PHONE_RELAY), exp });
+    try {
+      const r = await fetch(`${PHONE_RELAY}/${ch.topic}`, { method: "POST", body });
+      if (!r.ok) return { ok: false, error: `The relay answered HTTP ${r.status}.` };
+    } catch {
+      return { ok: false, error: "Couldn't reach the relay. Check this computer's internet connection." };
+    }
+    state.remoteCode = { code, exp };
+    return { ok: true, code, exp };
+  },
   async "remote-unpair"() {                // a new key: phones paired before can no longer read or send
+    delete state.remoteCode;
     newRemotePairing();
     await syncPhone();
     return { ok: true };
