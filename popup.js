@@ -321,6 +321,7 @@ $("learn").addEventListener("click", async () => {
   if (!r.ok) $("learn-msg").textContent = r.message || r.error;   // after render, which shows the last training
 });
 $("settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
+$("phoneapp").addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("options.html#phoneapp") }));
 
 // Keep the numbers live while the popup is open, but never redraw the lists
 // under the pointer.
