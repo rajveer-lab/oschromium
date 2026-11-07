@@ -50,6 +50,21 @@ function showPairing(s, phone) {
   g.fillStyle = "#000";
   for (let r = 0; r < n; r++) for (let col = 0; col < n; col++) if (q.isDark(r, col)) g.fillRect(off + col * cell, off + r * cell, cell, cell);
   $("rout").textContent = phone && phone.app ? `Phone app last seen at ${new Date(phone.app).toLocaleTimeString()}.` : "";
+  showCode();
+}
+
+// The short code for the Android app: a fresh one whenever the last has run out.
+async function showCode(fresh = false) {
+  const { state } = await chrome.storage.local.get("state");
+  let c = state && state.remoteCode;
+  if (fresh || !c || c.exp - Date.now() < 60 * 1000) {
+    $("rcode").textContent = "…";
+    const r = await send({ type: "remote-code" });
+    if (!r || !r.ok) { $("rcode").textContent = "—"; $("rcodeinfo").textContent = (r && r.error) || "Couldn't make a code."; return; }
+    c = r;
+  }
+  $("rcode").textContent = c.code;
+  $("rcodeinfo").textContent = `Works until ${new Date(c.exp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`;
 }
 
 function showCarbon(c) {
@@ -135,6 +150,8 @@ $("remote").addEventListener("change", async (e) => {
   await send({ type: "settings", settings: { remote: e.target.checked } });
   await load();
 });
+
+$("rnewcode").addEventListener("click", () => showCode(true));
 
 $("rcopy").addEventListener("click", async () => {
   await navigator.clipboard.writeText(appLink).catch(() => {});
