@@ -40,15 +40,21 @@
     <section class="card">
       <h2>Connect to your laptop</h2>
       <ol>
-        <li>On your laptop, open Smart Tab Saver, then <b>Phone app</b> at the bottom of its menu.</li>
+        <li>On your laptop, click the Smart Tab Saver icon, then <b>Phone app</b> at the bottom.</li>
         <li>Tick <b>Let my phone see and control the tabs in this browser</b>.</li>
-        <li>Scan the QR code with this phone's camera.</li>
+        <li>Type the code it shows:</li>
       </ol>
-      <p class="sub">Opened this from your Home Screen? Paste the pairing code you copied:</p>
+      <input id="short" class="codein" type="text" inputmode="text" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="9" placeholder="K7QM-2XPA" aria-label="Code from your laptop">
+      <button id="connect-code" type="button" class="big">Connect</button>
+      <p id="short-msg" class="sub"></p>
+    </section>
+    <details class="card">
+      <summary>Other ways to connect</summary>
+      <p>Scan the QR code on the laptop with your phone's camera, or paste a pairing code you copied:</p>
       <textarea id="code" rows="3" placeholder="sts-…" spellcheck="false" autocapitalize="off"></textarea>
       <div class="row"><button id="paste" type="button">Paste</button><button id="connect" type="button" class="primary">Connect</button></div>
       <p id="code-msg" class="sub"></p>
-    </section>
+    </details>
   </main>
 
   <div id="toast" role="status" hidden></div>
