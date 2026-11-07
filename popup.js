@@ -1,4 +1,4 @@
-import { features, score, newMeta } from "./policy.js";
+import { features, contexts, score, newMeta } from "./policy.js";
 import { CALL_SITES, PHONE_ORIGINS, DEFAULT_SETTINGS, REASON, counts, sleepable, limits, greenSignals, callActive, isAway } from "./rules.js";
 import { clusterTabs } from "./tasks.js";
 
@@ -222,7 +222,8 @@ async function render() {
 
   // tasks
   const web = tabs.filter((t) => /^https?:/.test(t.url || ""));
-  const tasks = s.settings.taskFocus ? clusterTabs(web.map((t) => ({ id: t.id, title: t.title, url: t.url, openerTabId: t.openerTabId }))) : [];
+  const allTasks = clusterTabs(web.map((t) => ({ id: t.id, title: t.title, url: t.url, openerTabId: t.openerTabId })));
+  const tasks = s.settings.taskFocus ? allTasks : [];
   const byId = new Map(tabs.map((t) => [t.id, t]));
   const [front] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   const activeId = front ? front.id : null;
@@ -262,10 +263,14 @@ async function render() {
   // next to sleep: the tabs the model scores highest right now
   const next = $("next");
   next.replaceChildren();
-  const cand = tabs.filter((tb) => sleepable(tb, s)).map((tb) => {
-    const meta = s.metas[String(tb.id)] || newMeta();
-    return { tb, p: score(s.model, features(meta, s.clock, c)) };
-  }).sort((a, b) => b.p - a.p).slice(0, 4);
+  const metaOf = (tb) => s.metas[String(tb.id)] || newMeta();
+  const taskOf = new Map();
+  for (const task of allTasks) for (const id of task.ids) taskOf.set(id, task.label);
+  const sleepers = tabs.filter((tb) => sleepable(tb, s));
+  const residents = [...new Set([...awake, ...sleepers])];
+  const ctx = contexts(residents, metaOf, s.clock, (tb) => taskOf.get(tb.id), taskOf.get(lastRef), (k) => (s.taskLast || {})[k]);
+  const cand = sleepers.map((tb) => ({ tb, p: score(s.model, features(metaOf(tb), s.clock, c, ctx.get(tb))) }))
+    .sort((a, b) => b.p - a.p).slice(0, 4);
   if (!cand.length) next.append(el("li", "empty", "No tab can sleep right now."));
   for (const { tb, p } of cand) {
     const bar = el("span", "bar");
