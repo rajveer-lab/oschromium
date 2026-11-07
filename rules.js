@@ -13,6 +13,12 @@ export const CALL_SITES = [
 ];
 export const CARBON_ORIGIN = "https://api.electricitymap.org/*";
 
+// Phone handoff: the phone's automation app publishes to a private topic on
+// this relay (ntfy), and the extension pauses video on these sites.
+export const PHONE_RELAY = "https://ntfy.sh";
+export const VIDEO_SITES = ["youtube.com"];
+export const PHONE_ORIGINS = ["https://ntfy.sh/*", "https://*.youtube.com/*"];
+
 export const DEFAULT_SETTINGS = {
   maxAwake: 8,
   paused: false,
@@ -30,6 +36,8 @@ export const DEFAULT_SETTINGS = {
   awayMinutes: 5,
   pausedMinutes: 10,
   handoff: false,         // share what's playing with your other Chrome devices
+  phoneHandoff: false,    // pause and sleep YouTube here when it opens on your phone
+  phoneTopic: "",         // the private relay topic your phone publishes to
   green: true,
   carbonKey: "",
   carbonZone: "",
@@ -41,12 +49,19 @@ export const REASON = {
   model: "learned model", lru: "LRU fallback", you: "you", chrome: "Chrome",
   task: "task finished", media: "paused video", handoff: "playing on another device",
   call: "call mode", green: "green mode", away: "you were away",
+  phone: "playing on your phone",
 };
 
 const key = (id) => String(id);
 
 export function hostOf(url) {
   try { return new URL(url).hostname; } catch { return ""; }
+}
+
+const onSite = (host, sites) => sites.some((h) => host === h || host.endsWith("." + h));
+
+export function isVideoSite(url) {
+  return /^https?:/.test(url || "") && onSite(hostOf(url), VIDEO_SITES);
 }
 
 // Only ordinary websites count toward the limit. Chrome's own pages, pinned
@@ -58,8 +73,11 @@ export function counts(tab, s) {
   if (tab.pinned && s.settings.protectPinned) return false;
   if (s.dirty && s.dirty[key(tab.id)]) return false;
   if (s.calls && s.calls[key(tab.id)]) return false;
-  const host = hostOf(tab.url);
-  return !s.settings.excluded.some((h) => host === h || host.endsWith("." + h));
+  return !isExcluded(tab.url, s);
+}
+
+export function isExcluded(url, s) {
+  return onSite(hostOf(url), s.settings.excluded);
 }
 
 export function sleepable(tab, s, now = Date.now()) {
