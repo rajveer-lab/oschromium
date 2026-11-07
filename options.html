@@ -18,6 +18,9 @@
   .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   h2.sec { margin: 4px 0 -4px; }
   code { font-size: 12px; }
+  .pair { display: flex; gap: 16px; align-items: flex-start; }
+  .pair canvas { flex: none; width: 200px; height: 200px; border-radius: 10px; background: #fff; }
+  @media (max-width: 520px) { .pair { flex-direction: column; } }
 </style>
 </head>
 <body>
@@ -70,6 +73,22 @@
     <div class="actions"><button type="button" class="small" id="ptest">Send a test signal</button><button type="button" class="small" id="pnew">New link</button><span class="hint" id="pout"></span></div>
   </section>
 
+  <h2 class="sec" id="phoneapp">Phone app</h2>
+  <section class="card">
+    <label class="opt"><input type="checkbox" id="remote"> <span><b>Let my phone see and control the tabs in this browser</b><br><span class="hint">See your tabs on your phone and sleep, wake, close, pause or open them from there. Everything is encrypted on this computer with a key only your phone gets, from the QR code; the relay in between only passes scrambled data.</span></span></label>
+    <div id="pair" hidden>
+      <div class="pair">
+        <canvas id="qr" width="400" height="400" aria-label="QR code that connects the phone app"></canvas>
+        <div class="hint">
+          <b>Scan this with your phone's camera.</b> The Smart Tab Saver app opens, already connected to this browser.<br><br>
+          <b>Android:</b> in Chrome's menu ⋮ choose <b>Install app</b> or <b>Add to Home screen</b>.<br>
+          <b>iPhone:</b> in the app tap <b>Copy pairing code</b>, then Share → <b>Add to Home Screen</b>. Open the new icon and paste the code once.
+        </div>
+      </div>
+      <div class="actions"><button type="button" class="small" id="rcopy">Copy link</button><button type="button" class="small" id="runpair">Disconnect all phones</button><span class="hint" id="rout"></span></div>
+    </div>
+  </section>
+
   <h2 class="sec">Green mode</h2>
   <section class="card">
     <div class="hint">Battery and CPU work with no setup. To also react to how dirty your power grid is right now, add a free key from <b>electricitymaps.com</b> (Free tier → API key) and your zone.</div>
@@ -96,6 +115,7 @@
   </section>
 
   <div class="row"><button type="button" class="primary" id="save">Save</button><span class="hint" id="saved"></span></div>
+  <script src="lib/qrcode.js"></script>
   <script type="module" src="options.js"></script>
 </body>
 </html>
