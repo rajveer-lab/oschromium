@@ -1,7 +1,7 @@
 // The Smart Tab Saver phone app: shows the tabs open in your laptop's Chrome
 // and sends commands to the extension, sealed with the pairing key (link.js).
 
-import { parsePairing, pairingCode, seal, unseal, toLaptop, toPhone, command } from "./link.js";
+import { DEFAULT_RELAY, parsePairing, pairingCode, codeChannel, seal, unseal, toLaptop, toPhone, command } from "./link.js";
 
 const $ = (id) => document.getElementById(id);
 const STORE = "sts-pairing";
@@ -227,6 +227,46 @@ function connect(code) {
   pair = p;
   return true;
 }
+
+// The short code from the laptop: it leads to the pairing, sealed under a key
+// made from the code, waiting on the relay.
+const RELAY = new URLSearchParams(location.search).get("relay") || DEFAULT_RELAY;
+
+async function connectWithCode(text) {
+  const ch = await codeChannel(text);
+  if (!ch) return "The code has 8 letters and numbers, like K7QM-2XPA.";
+  for (let tries = 0; tries < 3; tries++) {
+    try {
+      const body = await (await fetch(`${RELAY}/${ch.topic}/json?poll=1&since=15m`, { cache: "no-store" })).text();
+      for (const line of body.split("\n").reverse()) {
+        if (!line.trim()) continue;
+        const msg = await unseal(ch.key, JSON.parse(line).message || "");
+        if (msg && msg.t === "pair" && msg.exp > Date.now() && connect(msg.code)) return null;
+      }
+    } catch {
+      return "Can't reach the internet. Check your connection and try again.";
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  return "No laptop is showing that code. Check it, or press New code on the laptop.";
+}
+
+$("connect-code").addEventListener("click", async () => {
+  const b = $("connect-code");
+  b.disabled = true;
+  b.textContent = "Connecting…";
+  $("short-msg").textContent = "";
+  const problem = await connectWithCode($("short").value);
+  b.disabled = false;
+  b.textContent = "Connect";
+  if (problem) $("short-msg").textContent = problem;
+  else start();
+});
+
+$("short").addEventListener("input", (e) => {         // K7QM2XPA -> K7QM-2XPA as you type
+  const c = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+  e.target.value = c.length > 4 ? c.slice(0, 4) + "-" + c.slice(4) : c;
+});
 
 $("paste").addEventListener("click", async () => {
   try { $("code").value = await navigator.clipboard.readText(); } catch { $("code-msg").textContent = "Paste it into the box instead."; }
