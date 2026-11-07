@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Smart Tab Saver</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="icons/icon32.png" alt="" width="22" height="22">
+    <h1>Smart Tab Saver</h1>
+    <label class="switch" title="Pause or resume">
+      <input type="checkbox" id="on" checked>
+      <span aria-hidden="true"></span>
+      <span class="sr">Active</span>
+    </label>
+  </header>
+
+  <section class="status">
+    <div class="big"><span id="awake">–</span><small> of <span id="limit">–</span> websites awake</small></div>
+    <div class="sub"><span id="asleep">–</span> asleep · <span id="ram">–</span></div>
+    <div id="modes" class="modes" hidden></div>
+    <div class="sub">Chrome pages, pinned tabs and tabs playing sound don't count.</div>
+  </section>
+
+  <section id="tasks-sec" hidden>
+    <h2>Your tasks</h2>
+    <ul id="tasks" class="tabs"></ul>
+    <div class="hint" id="task-note"></div>
+  </section>
+
+  <section class="card">
+    <div class="row between">
+      <span class="label">Keep awake at most</span>
+      <output id="max-out">8</output>
+    </div>
+    <input type="range" id="max" min="2" max="30" step="1" value="8" aria-label="Maximum awake tabs">
+  </section>
+
+  <section class="card">
+    <div class="label">Reloads when you went back to a sleeping tab</div>
+    <div class="compare">
+      <div><b id="ours">0</b><span>with Smart Tab Saver</span></div>
+      <div><b id="lru">0</b><span>plain LRU would have caused</span></div>
+    </div>
+    <div class="hint" id="since"></div>
+    <div class="hint" id="prewake-note" hidden></div>
+  </section>
+
+  <section class="card">
+    <div class="row between"><span class="label">Who chooses which tab sleeps</span><span class="hint" id="model-src"></span></div>
+    <div class="trust"><i id="trust-bar"></i></div>
+    <div class="row between hint"><span>Learned model <b id="trust-m">50%</b></span><span>LRU <b id="trust-l">50%</b></span></div>
+  </section>
+
+  <section>
+    <h2>Next to sleep</h2>
+    <ul id="next" class="tabs"></ul>
+  </section>
+
+  <section>
+    <h2>Sleeping</h2>
+    <ul id="sleeping" class="tabs"></ul>
+    <div class="hint" id="sleeping-hint" hidden>Point at a sleeping tab to start loading it, click to open it.</div>
+  </section>
+
+  <section>
+    <h2>Smart features</h2>
+    <div id="features" class="features"></div>
+  </section>
+
+  <section class="card">
+    <button id="learn" type="button" class="primary">Learn from my browsing</button>
+    <div class="hint" id="learn-msg">Retrains the model on your own tab switches, labelled by the optimal algorithm. Stays on this computer.</div>
+  </section>
+
+  <footer>
+    <button id="settings" type="button" class="link">Settings</button>
+    <span class="hint" id="note"></span>
+  </footer>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
