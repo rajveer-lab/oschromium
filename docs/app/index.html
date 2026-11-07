@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Smart Tab Saver</title>
+<meta name="theme-color" content="#1f6f5c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tab Saver">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header>
+    <img src="icon-192.png" alt="" width="28" height="28">
+    <div>
+      <h1>Smart Tab Saver</h1>
+      <div id="status" class="sub">Connecting…</div>
+    </div>
+  </header>
+
+  <main id="paired" hidden>
+    <button id="pause-all" type="button" class="big">Pause YouTube on my laptop</button>
+    <div id="note" class="note" hidden></div>
+    <div id="tabs"></div>
+    <section id="ios" class="card" hidden>
+      <b>Adding this to your Home Screen?</b>
+      <p>Copy your pairing code first: the Home Screen app asks for it once.</p>
+      <button id="copy-code" type="button">Copy pairing code</button>
+    </section>
+    <footer>
+      <span>Connected to your laptop's Chrome. Your tabs are encrypted end to end.</span>
+      <button id="unpair" type="button" class="link">Disconnect</button>
+    </footer>
+  </main>
+
+  <main id="unpaired" hidden>
+    <section class="card">
+      <h2>Connect to your laptop</h2>
+      <ol>
+        <li>On your laptop, open Smart Tab Saver, then <b>Phone app</b> at the bottom of its menu.</li>
+        <li>Tick <b>Let my phone see and control the tabs in this browser</b>.</li>
+        <li>Scan the QR code with this phone's camera.</li>
+      </ol>
+      <p class="sub">Opened this from your Home Screen? Paste the pairing code you copied:</p>
+      <textarea id="code" rows="3" placeholder="sts-…" spellcheck="false" autocapitalize="off"></textarea>
+      <div class="row"><button id="paste" type="button">Paste</button><button id="connect" type="button" class="primary">Connect</button></div>
+      <p id="code-msg" class="sub"></p>
+    </section>
+  </main>
+
+  <div id="toast" role="status" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
