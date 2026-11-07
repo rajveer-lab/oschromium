@@ -6,9 +6,9 @@ Manifest V3 · Chrome 116 or later · plain JavaScript ES modules, no build step
 
 ## Demo
 
-[![Smart Tab Saver demo: lowering the limit puts tabs to sleep, predictive wake, call mode](docs/demo/preview.gif)](docs/demo/smart-tab-saver-demo.mp4?raw=true)
+[![Smart Tab Saver demo: lowering the limit puts tabs to sleep, predictive wake, call mode](docs/demo/preview.gif)](https://drive.google.com/file/d/1zC7HcSF-0APsv2wK4xu38vv_f1qBksJv/view?usp=sharing)
 
-**[Watch the full demo (4:21, MP4)](docs/demo/smart-tab-saver-demo.mp4?raw=true)** · [also on Google Drive](https://drive.google.com/file/d/1zC7HcSF-0APsv2wK4xu38vv_f1qBksJv/view?usp=sharing)
+**[Watch the full demo (4:21)](https://drive.google.com/file/d/1zC7HcSF-0APsv2wK4xu38vv_f1qBksJv/view?usp=sharing)**
 
 The video walks through the awake-tab limit, reloads compared with LRU, task focus, predictive wake, call mode, green mode and "Learn from my browsing". It was recorded in Chromium with the extension loaded unpacked. The websites are local stand-in pages, the grace period and task timer were shortened so effects show within seconds, and the battery event was sent by the demo script (the recording machine has no battery).
 
