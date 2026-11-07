@@ -10,7 +10,7 @@ Manifest V3 · Chrome 116 or later · plain JavaScript ES modules, no build step
 - **Smart choices.** A small model trained to imitate the optimal algorithm picks which tab sleeps, LRU steps in when the model isn't sure, and the popup shows how you're doing against plain LRU.
 - **Tasks.** Tabs are grouped into tasks such as "Travel · Goa"; a task you've left sleeps together.
 - **Context.** Fewer tabs stay awake on battery, during a video call or while you're away; heading for the tab bar wakes the tab you'll want next.
-- **Your phone.** Opening YouTube on your phone pauses it on the laptop, and the phone app lets you sleep, wake, close, pause or open your laptop's tabs.
+- **Your phone.** The Android app (or the web app on any phone) lets you sleep, wake, close, pause or open your laptop's tabs, and opening YouTube on your phone can pause it on the laptop.
 - **Private.** Everything is worked out on your computer; what goes to your phone is encrypted end to end.
 
 **Contents:** [Demo](#demo) · [Install](#install) · [The idea](#the-idea-tabs-are-pages) · [How it picks the tab to sleep](#how-it-picks-the-tab-to-sleep) · [Smart features](#smart-features) · [Phone app](#phone-app) · [The popup](#the-popup) · [Results](#results) · [Privacy and permissions](#privacy-and-permissions) · [Tests](#tests) · [Project structure](#project-structure) · [Authors](#authors)
@@ -114,7 +114,10 @@ The button in the popup retrains the model on your own tab switches (the last 5,
 
 ## Phone app
 
-See the tabs open on your laptop from your phone, and control them from there. It works on Android and iPhone, with nothing to install from an app store: it's a web app at **[rajveer-lab.github.io/oschromium/app](https://rajveer-lab.github.io/oschromium/app/)** that you add to your home screen.
+See the tabs open on your laptop from your phone, and control them from there.
+
+- **Android app:** **[download the APK](https://rajveer-lab.github.io/oschromium/download/smart-tab-saver.apk)** (57 KB, Android 7 or later).
+- **Any phone, iPhone included:** the same app as a web app at **[rajveer-lab.github.io/oschromium/app](https://rajveer-lab.github.io/oschromium/app/)**, which you can add to your home screen.
 
 | On your phone you see | And can |
 |---|---|
@@ -125,18 +128,27 @@ See the tabs open on your laptop from your phone, and control them from there. I
 | | **Close** a tab (tap twice) |
 | | **Pause YouTube on my laptop**, one big button |
 
+**Install the Android app:**
+
+1. On your phone, open the [APK link](https://rajveer-lab.github.io/oschromium/download/smart-tab-saver.apk) and download it.
+2. Open the downloaded file. If Android asks, allow your browser to **install unknown apps**, then tap **Install**. It isn't on Google Play, so Play Protect may ask you to confirm.
+3. Open **Smart Tab Saver**.
+
 **Connect your phone (once):**
 
 1. On the laptop, click the Smart Tab Saver icon, then **Phone app** at the bottom of the popup.
-2. Tick **Let my phone see and control the tabs in this browser**. A QR code appears.
-3. Scan the QR code with your phone's camera. The app opens, already connected.
-4. Add it to your home screen:
+2. Tick **Let my phone see and control the tabs in this browser**. A short code such as **K7QM-2XPA** appears, along with a QR code.
+3. In the Android app, type the code and tap **Connect**. Codes work for 10 minutes; **New code** makes another.
+
+Or, on any phone, scan the QR code with the camera: the web app opens, already connected. To add the web app to your home screen:
    - **Android:** in Chrome's menu ⋮ choose **Install app** or **Add to Home screen**.
    - **iPhone:** tap **Copy pairing code** in the app, then Share → **Add to Home Screen**. Open the new icon and paste the code once (iPhone keeps home-screen apps separate from Safari).
 
 **Disconnect all phones** in Settings makes a new key, so every phone connected before stops working until it scans the new QR code.
 
-**Privacy.** The QR code holds a random encryption key, in the part of the address after `#`, which browsers never send to a server. The laptop and the phone encrypt everything with it (AES-GCM) before it goes through the free [ntfy.sh](https://ntfy.sh) relay, so the relay only ever passes scrambled data. The phone gets tab titles (cut to 90 characters) and site names; a full address is sent only when you tap **Open on phone**. The laptop ignores commands that don't decrypt with the key, that are older than 2 minutes or that it has seen before. It sends tab lists only while the app is open, and for 5 minutes after.
+**Privacy.** The QR code holds a random encryption key, in the part of the address after `#`, which browsers never send to a server. The laptop and the phone encrypt everything with it (AES-GCM) before it goes through the free [ntfy.sh](https://ntfy.sh) relay, so the relay only ever passes scrambled data. The phone gets tab titles (cut to 90 characters) and site names; a full address is sent only when you tap **Open on phone**. The laptop ignores commands that don't decrypt with the key, that are older than 2 minutes or that it has seen before. It sends tab lists only while the app is open, and for 5 minutes after. The short code works the same way without showing the key: the laptop leaves the pairing on the relay, sealed under a key stretched from the code (PBKDF2, 200,000 rounds), on a topic named from the code, and the app finds and opens it when you type the code. The code stops working after 10 minutes, and **Disconnect all phones** makes anything found with an old code useless.
+
+**Building the APK yourself:** the Android project is in `android/`. It shows the same screens as the web app, bundled from `docs/app`. With the Android SDK (platform 35) installed, run `gradle assembleRelease` in `android/`; the APK lands in `android/app/build/outputs/apk/release/`. It's signed with `android/smarttabsaver.keystore` (password `smarttabsaver`) so every build can update the installed app. That key is public in this repository, so make a private one before publishing on Google Play.
 
 ## The popup
 
@@ -179,7 +191,7 @@ Everything is worked out on your computer and kept in `chrome.storage.local`. Fo
 
 ## Tests
 
-The end-to-end suite (82 checks) loads the extension into real Chromium under Xvfb (Linux) and checks every feature: the limit, task detection, task focus, predictive wake, call mode, green mode, handoff, phone handoff and the phone app (with a local stand-in for the relay, including the app itself, its encryption and its refusal of wrong-key, stale and replayed commands), paused video and away, tab groups, and the popup and settings pages.
+The end-to-end suite (87 checks) loads the extension into real Chromium under Xvfb (Linux) and checks every feature: the limit, task detection, task focus, predictive wake, call mode, green mode, handoff, phone handoff and the phone app (with a local stand-in for the relay, including the app itself, connecting with a short code, its encryption and its refusal of wrong-key, stale and replayed commands), paused video and away, tab groups, and the popup and settings pages.
 
 ```bash
 tests/build.sh && tests/run.sh
@@ -204,6 +216,8 @@ tests/build.sh && tests/run.sh
 | `offscreen.html`, `offscreen.js` | Battery status for green mode |
 | `tests/` | `build.sh`, `run.sh`, the test runner (`harness/`) and local test pages (`site/`) |
 | `docs/app/` | The phone app (installable web app): `index.html`, `app.js`, `app.css`, `link.js` (pairing and encryption, shared with the extension), `sw.js`, manifest and icons |
+| `android/` | The Android app: a small Java app that shows `docs/app` from inside the APK (`MainActivity.java`), its icons and signing key |
+| `docs/download/` | The built Android APK, downloadable from GitHub Pages |
 | `docs/index.html` | The project's GitHub Pages home |
 | `lib/qrcode.js` | QR code generator for the pairing code ([qrcode-generator](https://www.npmjs.com/package/qrcode-generator) 1.4.4, MIT) |
 | `docs/demo/` | The demo video and its preview |
