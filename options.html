@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Smart Tab Saver settings</title>
+<link rel="stylesheet" href="popup.css">
+<style>
+  body { width: auto; max-width: 560px; margin: 24px auto; padding: 0 16px; gap: 14px; }
+  h1 { font-size: 20px; }
+  label.opt { display: flex; gap: 10px; align-items: flex-start; }
+  label.opt input { margin-top: 3px; accent-color: var(--accent); }
+  textarea, input.text, input.num { font: 13px ui-monospace, Menlo, Consolas, monospace; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  textarea { width: 100%; min-height: 90px; }
+  input.text { width: 100%; }
+  input.num { width: 72px; }
+  .field { display: grid; gap: 4px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  h2.sec { margin: 4px 0 -4px; }
+  code { font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>Smart Tab Saver settings</h1>
+
+  <section class="card">
+    <label class="opt"><input type="checkbox" id="pinned"> <span><b>Never sleep pinned tabs</b><br><span class="hint">Pinned tabs such as mail or chat stay awake.</span></span></label>
+    <label class="opt"><input type="checkbox" id="typing"> <span><b>Never sleep a tab where I'm typing</b><br><span class="hint">Needs permission to run a tiny script on pages. It only notices that you typed in a form; it never reads or sends what you type.</span></span></label>
+  </section>
+
+  <section class="card">
+    <div class="row between"><span class="label">Model confidence needed</span><output id="thr-out"></output></div>
+    <input type="range" id="thr" min="0.3" max="0.9" step="0.05">
+    <div class="hint">When the model's best guess is below this, the tab chosen is simply the least recently used one.</div>
+  </section>
+
+  <section class="card">
+    <span class="label">Never sleep these sites</span>
+    <textarea id="excluded" placeholder="one site per line, e.g. docs.google.com"></textarea>
+  </section>
+
+  <h2 class="sec">Task focus</h2>
+  <section class="card">
+    <div class="field">
+      <label class="label" for="shift">A task counts as finished after you've been away from it for</label>
+      <div class="actions"><input class="num" type="number" id="shift" min="0.5" max="60" step="0.5"> <span class="hint">minutes (and at least 3 tab switches)</span></div>
+    </div>
+    <label class="opt"><input type="checkbox" id="groups"> <span><b>Show my tasks as Chrome tab groups</b><br><span class="hint">Groups the tabs of each task in the tab strip and names the group. Groups you made yourself are never touched.</span></span></label>
+  </section>
+
+  <h2 class="sec">Away &amp; handoff</h2>
+  <section class="card">
+    <div class="grid2">
+      <div class="field"><label class="label" for="paused">Sleep a paused video after</label>
+        <div class="actions"><input class="num" type="number" id="paused" min="1" max="240" step="1"> <span class="hint">minutes</span></div></div>
+      <div class="field"><label class="label" for="away">I'm away after no keyboard or mouse for</label>
+        <div class="actions"><input class="num" type="number" id="away" min="1" max="120" step="1"> <span class="hint">minutes</span></div></div>
+    </div>
+    <label class="opt"><input type="checkbox" id="handoff"> <span><b>Sleep a paused video here when the same video starts on my other Chrome device</b><br><span class="hint">Uses Chrome sync between browsers signed in to your account. Only a scrambled code of the video's address is shared, never the address.</span></span></label>
+  </section>
+
+  <h2 class="sec">Green mode</h2>
+  <section class="card">
+    <div class="hint">Battery and CPU work with no setup. To also react to how dirty your power grid is right now, add a free key from <b>electricitymaps.com</b> (Free tier → API key) and your zone.</div>
+    <div class="field"><label class="label" for="ckey">Electricity Maps API key</label><input class="text" type="password" id="ckey" autocomplete="off" spellcheck="false"></div>
+    <div class="grid2">
+      <div class="field"><label class="label" for="zone">Zone</label><input class="text" type="text" id="zone" placeholder="e.g. IN-SO, DE, US-CAL-CISO" spellcheck="false"></div>
+      <div class="field"><label class="label" for="high">High carbon from</label>
+        <div class="actions"><input class="num" type="number" id="high" min="50" max="1500" step="10"> <span class="hint">g CO₂/kWh</span></div></div>
+    </div>
+    <div class="actions"><button type="button" class="small" id="ctest">Check grid now</button><span class="hint" id="cout"></span></div>
+  </section>
+
+  <h2 class="sec">Call mode</h2>
+  <section class="card">
+    <div class="hint">Call mode watches these sites for a microphone or camera turning on: <code id="sites"></code>. Turn it on in the popup.</div>
+  </section>
+
+  <section class="card">
+    <span class="label">Reset</span>
+    <div class="actions">
+      <button type="button" class="small" id="reset-model">Go back to the pretrained model</button>
+      <button type="button" class="small" id="reset-stats">Reset reload counts</button>
+    </div>
+  </section>
+
+  <div class="row"><button type="button" class="primary" id="save">Save</button><span class="hint" id="saved"></span></div>
+  <script type="module" src="options.js"></script>
+</body>
+</html>
