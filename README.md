@@ -7,7 +7,7 @@ Manifest V3 · Chrome 116 or later · plain JavaScript ES modules, no build step
 **What you get**
 
 - **Fewer tabs eating memory.** Only as many websites as you choose stay loaded (8 by default); the rest sleep in the tab strip and reload when you click them.
-- **Smart choices.** A small model trained to imitate the optimal algorithm picks which tab sleeps, LRU steps in when the model isn't sure, and the popup shows how you're doing against plain LRU.
+- **Smart choices.** A small task-aware model trained to imitate the optimal algorithm picks which tab sleeps; it has fewer reloads than plain LRU on structured browsing, and LRU takes over whenever the model has been doing worse. The popup shows how you're doing against LRU.
 - **Tasks.** Tabs are grouped into tasks such as "Travel · Goa"; a task you've left sleeps together.
 - **Context.** Fewer tabs stay awake on battery, during a video call or while you're away; heading for the tab bar wakes the tab you'll want next.
 - **Your phone.** The Android app (or the web app on any phone) lets you sleep, wake, close, pause or open your laptop's tabs, and opening YouTube on your phone can pause it on the laptop.
@@ -54,10 +54,17 @@ Every open tab holds memory, but you only work with a few at a time. Smart Tab S
 
 ## How it picks the tab to sleep
 
-1. **Score.** Each tab that may sleep gets a probability that it won't be needed soon, from a logistic regression over eight features of its history: age, use count, the last three gaps between uses, mean gap, how overdue it is (age ÷ mean gap) and whether it was used more than once. The model was trained offline to imitate OPT: a tab is labelled "not needed soon" if its next use is more than 2 × C switches away.
+1. **Score.** Each tab that may sleep gets a probability that it won't be needed within 2 × C switches, from a linear model over 13 features:
+   - its own history: age, use count, the last three gaps between uses, mean gap, how overdue it is (age ÷ mean gap) and whether it was used more than once;
+   - where it stands among the other tabs: its recency rank, its use-count rank, and how many of its last four uses were recent;
+   - its task: whether it belongs to the task you're on, and how long since that task was used.
+
+   The model was trained offline to pick the tab Belady's OPT would put to sleep (listwise, with DAgger so it learns from the situations its own choices lead to) and calibrated so the score is a probability. The tab with the highest score sleeps.
 2. **Fall back.** If even the best score is below the confidence threshold (default 50%), the least recently used tab sleeps instead.
-3. **Regret guard.** Going back soon to a tab that slept counts against whichever of the model or LRU chose it, and trust shifts between the two (multiplicative weights). The popup shows the current split as a trust bar.
-4. **Keep score.** A shadow LRU runs on the same switches with the same limit and protections, so the popup can show your reloads next to the ones plain LRU would have caused.
+3. **Switching.** The model and plain LRU both run as shadows on the same switches. Whichever has caused fewer reloads lately (a count that halves every 100 switches) makes the decision, so the model decides when it's right for you and LRU when it isn't. The popup's trust bar shows the model's share.
+4. **Keep score.** The popup shows your reloads next to the ones plain LRU would have caused on the same switches.
+
+The method, the experiments behind it and how to re-run them are in [model/README.md](model/README.md).
 
 Tabs from the task you're working on are the last to go.
 
@@ -110,7 +117,7 @@ How it works: the extension listens to its private topic on the relay over a Web
 
 ### Learn from my browsing
 
-The button in the popup retrains the model on your own tab switches (the last 5,000). Your history is replayed under OPT, every moment a tab had to sleep becomes a labelled example, and a new logistic regression is fitted by Newton's method. The new model is kept only if, replayed on that same history, it causes no more reloads than the current one. It needs more distinct tabs than your limit and at least 100 training examples, and it all stays on your computer. Settings has a button to go back to the pretrained model.
+The button in the popup retrains the model on your own tab switches (the last 5,000), with the same method as the pretrained model: your history, with the task of each switch, is replayed under OPT, and the model learns to pick what OPT would at each moment a tab had to sleep. It takes about a second. The new model is kept only if, replayed on that same history, it causes no more reloads than the current one. It needs more distinct tabs than your limit and at least 15 moments where a tab had to sleep, and it all stays on your computer. With a short history it often keeps the pretrained model, which is the safe outcome. Settings has a button to go back to the pretrained model.
 
 ## Phone app
 
@@ -152,13 +159,25 @@ Or, on any phone, scan the QR code with the camera: the web app opens, already c
 
 ## The popup
 
-From top to bottom: how many websites are awake out of the limit and how much RAM is free; the tasks found in your tabs; the "Keep awake at most" slider; reloads with Smart Tab Saver next to plain LRU; the trust bar between the model and LRU; the tabs next in line to sleep, with the model's score; the sleeping tabs, each with the reason it slept; the five smart features; and "Learn from my browsing". The switch in the header pauses the extension.
+From top to bottom: how many websites are awake out of the limit and how much RAM is free; the tasks found in your tabs; the "Keep awake at most" slider; reloads with Smart Tab Saver next to plain LRU; the trust bar (the model's share of recent success against LRU, which decides who chooses); the tabs next in line to sleep, with the model's score; the sleeping tabs, each with the reason it slept; the five smart features; and "Learn from my browsing". The switch in the header pauses the extension.
 
 Settings (the link at the bottom of the popup) holds the protections, the confidence threshold, excluded sites, the task timer, tab groups, the away and paused-video timers, handoff, phone handoff (your phone's link, a test signal and a new link), the phone app's QR code, the Electricity Maps key and zone, and buttons to reset the model or the reload counts. **Phone app**, also at the bottom of the popup, goes straight to the QR code.
 
 ## Results
 
-From our Review 3 report: a trace-driven simulation over 30 synthetic task-structured browsing strings of 1,200 switches each, with the limit at C = 8.
+**Current model** (from [model/README.md](model/README.md); re-run with `node model/train.mjs`). Reloads per 1,200 switches on held-out synthetic browsing, with tasks as the extension's clustering would see them:
+
+| Workload | C | OPT | LRU | Previous model + regret guard | **Current model + switching** |
+|---|---|---|---|---|---|
+| Task browsing | 4 | 146.0 | 240.4 | 255.1 | **241.8** |
+| Task browsing | 8 | 42.1 | 112.3 | 121.5 | **107.0** |
+| Task browsing | 12 | 13.0 | 66.6 | 71.9 | **64.0** |
+| Browsing + comparison sweeps | 8 | 104.3 | 231.7 | 242.0 | **177.2** |
+| Browsing + comparison sweeps | 12 | 50.9 | 105.8 | 135.6 | **74.3** |
+
+The current policy has 5% fewer reloads than LRU on task browsing at C = 8, 24–30% fewer when browsing includes comparison sweeps, and is never more than about 1% worse. The previous policy was up to 28% worse than LRU.
+
+**Previous model, as reported in Review 3:** a trace-driven simulation over 30 synthetic task-structured browsing strings of 1,200 switches each, with the limit at C = 8.
 
 | Policy | Reloads per 1,200 switches |
 |---|---|
@@ -191,7 +210,7 @@ Everything is worked out on your computer and kept in `chrome.storage.local`. Fo
 
 ## Tests
 
-The end-to-end suite (87 checks) loads the extension into real Chromium under Xvfb (Linux) and checks every feature: the limit, task detection, task focus, predictive wake, call mode, green mode, handoff, phone handoff and the phone app (with a local stand-in for the relay, including the app itself, connecting with a short code, its encryption and its refusal of wrong-key, stale and replayed commands), paused video and away, tab groups, and the popup and settings pages.
+The end-to-end suite (91 checks) loads the extension into real Chromium under Xvfb (Linux) and checks every feature: the limit, task detection, task focus, predictive wake, call mode, green mode, handoff, phone handoff and the phone app (with a local stand-in for the relay, including the app itself, connecting with a short code, its encryption and its refusal of wrong-key, stale and replayed commands), paused video and away, tab groups, and the popup and settings pages.
 
 ```bash
 tests/build.sh && tests/run.sh
@@ -204,8 +223,8 @@ tests/build.sh && tests/run.sh
 | File | What it does |
 |---|---|
 | `manifest.json` | Manifest V3: permissions, service worker, popup, icons |
-| `background.js` | Service worker: tab switches, regret guard, enforcing the limit, smart features, learning |
-| `policy.js` | Features, pretrained model, OPT labelling, logistic regression, replay |
+| `background.js` | Service worker: tab switches, switching between the model and LRU, enforcing the limit, smart features, learning |
+| `policy.js` | The eviction model: 13 features, pretrained weights, training (DAgger, listwise, calibration) and replay |
 | `rules.js` | Which tabs count and may sleep, default settings, the current limit |
 | `tasks.js` | Task clustering: TF-IDF and average-linkage clustering of tabs |
 | `popup.html`, `popup.css`, `popup.js` | The toolbar popup |
@@ -220,6 +239,7 @@ tests/build.sh && tests/run.sh
 | `docs/download/` | The built Android APK, downloadable from GitHub Pages |
 | `docs/index.html` | The project's GitHub Pages home |
 | `lib/qrcode.js` | QR code generator for the pairing code ([qrcode-generator](https://www.npmjs.com/package/qrcode-generator) 1.4.4, MIT) |
+| `model/` | How the eviction model is trained and tested: workload generators, training script, experiments and results ([model/README.md](model/README.md)) |
 | `docs/demo/` | The demo video and its preview |
 
 ## Related
