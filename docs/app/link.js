@@ -31,6 +31,33 @@ export function parsePairing(code) {
   return { id: m[1], key: m[2], relay };
 }
 
+// Connecting with a short code instead of the QR code: the laptop shows a
+// code like K7QM-2XPA for 10 minutes and leaves the pairing on the relay,
+// sealed under a key stretched from the code (PBKDF2), on a topic named from
+// it. Typing the code on the phone finds the topic and opens the pairing.
+const CODE_ABC = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";   // no 0/O, 1/I/L
+export const CODE_MINUTES = 10;
+
+export function newShortCode() {
+  const c = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => CODE_ABC[b % CODE_ABC.length]).join("");
+  return c.slice(0, 4) + "-" + c.slice(4);
+}
+
+export function normCode(code) {
+  const c = (code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return c.length === 8 && [...c].every((ch) => CODE_ABC.includes(ch)) ? c : null;
+}
+
+export async function codeChannel(code) {
+  const c = normCode(code);
+  if (!c) return null;
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(c), "PBKDF2", false, ["deriveBits"]);
+  const bits = new Uint8Array(await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: new TextEncoder().encode("smart-tab-saver pairing code"), iterations: 200000, hash: "SHA-256" }, base, 336));
+  const hex = [...bits.slice(32, 42)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return { topic: "sts-" + hex, key: b64(bits.slice(0, 32)) };
+}
+
 export const toLaptop = (p) => `${p.id}-ph`;    // commands from the phone
 export const toPhone = (p) => `${p.id}-pc`;     // tab lists and replies from the laptop
 
